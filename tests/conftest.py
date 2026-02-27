@@ -4,10 +4,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.auth.jwt import create_token
 from app.db.database import Base, get_db
 from app.main import app
 
-# Use an in-memory SQLite DB for tests
+# Use a file-based SQLite DB for tests (avoids threading issues with in-memory)
 TEST_DATABASE_URL = "sqlite:///./test_ops.db"
 
 engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
@@ -25,7 +26,7 @@ def override_get_db():
 @pytest.fixture(autouse=True)
 def setup_db():
     """Create tables before each test, drop after."""
-    from app.models.orm import OpsRequest, AuditLog, ApprovalRecord  # noqa
+    from app.models.orm import OpsRequest, AuditLog, ApprovalRecord, User  # noqa
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
@@ -39,7 +40,13 @@ def client():
     app.dependency_overrides.clear()
 
 
-# Convenience header sets
-REQUESTER_HEADERS = {"X-User-ID": "alice@acme.com", "X-User-Role": "requester"}
-APPROVER_HEADERS = {"X-User-ID": "bob@acme.com", "X-User-Role": "approver"}
-ADMIN_HEADERS = {"X-User-ID": "charlie@acme.com", "X-User-Role": "admin"}
+# ── JWT header helpers ────────────────────────────────────────────────────────
+
+def _bearer(email: str, role: str) -> dict:
+    token = create_token({"sub": email, "email": email, "role": role})
+    return {"Authorization": f"Bearer {token}"}
+
+
+REQUESTER_HEADERS = _bearer("alice@acme.com", "requester")
+APPROVER_HEADERS = _bearer("bob@acme.com", "approver")
+ADMIN_HEADERS = _bearer("charlie@acme.com", "admin")

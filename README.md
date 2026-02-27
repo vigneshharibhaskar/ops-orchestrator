@@ -227,6 +227,72 @@ Every state transition writes a row to `audit_logs`:
 
 ---
 
+## Auth
+
+JWT-based authentication (HS256, 1-hour expiry). Every protected endpoint requires `Authorization: Bearer <token>`.
+
+### Login
+```bash
+curl -s -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "alice@acme-fintech.com", "password": "password123"}' | jq .
+```
+
+Copy `access_token` from the response, then pass it on every subsequent call:
+
+```bash
+export TOKEN="<paste token here>"
+
+curl -s http://localhost:8000/requests \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+### Register (new user)
+```bash
+curl -s -X POST http://localhost:8000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "newuser@acme-fintech.com", "password": "password123", "role": "requester"}' | jq .
+```
+
+### Default seed accounts (dev only — created automatically on first startup)
+
+| Email | Role | Password |
+|---|---|---|
+| alice@acme-fintech.com | requester | password123 |
+| compliance@acme-fintech.com | approver | password123 |
+| admin@acme-fintech.com | admin | password123 |
+
+> Seed accounts use a hardcoded password for local development only. In production, change passwords immediately or disable seeding by setting real users before first boot.
+
+---
+
+## Deploy
+
+### Railway (recommended)
+
+1. Push repo to GitHub
+2. Create a new Railway project → **Deploy from GitHub repo**
+3. Add a **Postgres** plugin — `DATABASE_URL` is injected automatically
+4. Set the remaining environment variables under **Variables**:
+
+| Variable | Required | Notes |
+|---|---|---|
+| `DATABASE_URL` | Yes | Auto-set by Railway Postgres plugin |
+| `JWT_SECRET` | Yes | Random 32+ char string — `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `ANTHROPIC_API_KEY` | No | Falls back to deterministic stub planner if unset |
+| `ENV` | No | Set to `production` |
+
+5. Set the **start command**:
+```
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+### Render
+
+Same steps — add a Postgres database service, copy the internal DSN to `DATABASE_URL`, set `JWT_SECRET`, and use the start command above.
+
+---
+
 ## What Breaks First at Scale
 
 ### 1. Prompt Injection

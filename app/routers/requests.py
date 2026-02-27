@@ -1,7 +1,7 @@
-"""POST /requests and GET /requests/{id}"""
-from typing import List
+"""POST /requests, GET /requests, GET /requests/{id}"""
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Response
 from sqlalchemy.orm import Session
 
 from app.auth.rbac import require_role, Role, UserContext
@@ -43,6 +43,24 @@ def _serialize(req: OpsRequest) -> OpsRequestResponse:
     )
 
 
+@router.get(
+    "",
+    response_model=List[OpsRequestResponse],
+    responses={403: {"model": ErrorResponse}},
+)
+def list_requests(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: UserContext = Depends(require_role(Role.REQUESTER, Role.APPROVER, Role.ADMIN)),
+):
+    """List requests. Requesters see only their own; admins/approvers see all."""
+    query = db.query(OpsRequest)
+    if user.role == Role.REQUESTER:
+        query = query.filter(OpsRequest.requester_id == user.user_id)
+    results = query.order_by(OpsRequest.created_at.desc()).limit(limit).all()
+    return [_serialize(r) for r in results]
+
+
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
@@ -56,6 +74,8 @@ def submit_request(
     user: UserContext = Depends(require_role(Role.REQUESTER, Role.ADMIN)),
 ):
     """Submit a new ops request. Returns 409 if idempotency_key already used."""
+    # Identity comes from the JWT — ignore whatever the body claims.
+    body.requester_id = user.user_id
     try:
         req = orchestrator.submit_request(db, body)
     except DuplicateRequestError as exc:

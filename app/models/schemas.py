@@ -155,3 +155,38 @@ class ErrorResponse(BaseModel):
     error: str
     detail: Optional[str] = None
     correlation_id: Optional[str] = None
+
+
+# ── Auth schemas ─────────────────────────────────────────────────────────────
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str = Field(..., min_length=8)
+    role: Role = Role.REQUESTER
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    role: str
+
+
+# ── Approval queue summary ───────────────────────────────────────────────────
+
+
+class PendingApprovalItem(BaseModel):
+    id: str
+    correlation_id: str
+    requester_id: str
+    intent: str
+    created_at: datetime
+    overall_risk: Optional[str] = None
+    needs_human_approval: bool
+
+    model_config = {"from_attributes": True}

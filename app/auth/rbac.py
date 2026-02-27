@@ -1,14 +1,16 @@
-"""RBAC: header-based auth for MVP.
+"""JWT-based RBAC dependency.
 
-Headers expected on every request:
-  X-User-ID:   <user identifier>
-  X-User-Role: requester | approver | admin
+Every protected endpoint gets a UserContext injected via require_role().
+The token is read from the Authorization: Bearer <token> header.
 """
 from enum import Enum
 from typing import Optional
 
 from fastapi import Header, HTTPException, status
+from jose import JWTError
 from pydantic import BaseModel
+
+from app.auth.jwt import decode_token
 
 
 class Role(str, Enum):
@@ -18,39 +20,46 @@ class Role(str, Enum):
 
 
 class UserContext(BaseModel):
-    user_id: str
+    user_id: str  # email from JWT
     role: Role
 
 
-def _parse_user(x_user_id: Optional[str], x_user_role: Optional[str]) -> UserContext:
-    if not x_user_id:
+def _parse_token(authorization: Optional[str]) -> UserContext:
+    if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing X-User-ID header",
+            detail="Missing or invalid Authorization header",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    if not x_user_role:
+    token = authorization[7:]
+    try:
+        payload = decode_token(token)
+    except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing X-User-Role header",
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     try:
-        role = Role(x_user_role.lower())
-    except ValueError:
+        role = Role(payload["role"])
+    except (KeyError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Invalid role '{x_user_role}'. Must be one of: {[r.value for r in Role]}",
+            detail="Token missing or invalid role claim",
         )
-    return UserContext(user_id=x_user_id, role=role)
+    return UserContext(
+        user_id=payload.get("email", payload.get("sub", "")),
+        role=role,
+    )
 
 
 def require_role(*allowed_roles: Role):
     """Dependency factory: inject user context and enforce allowed roles."""
 
     async def dependency(
-        x_user_id: Optional[str] = Header(default=None),
-        x_user_role: Optional[str] = Header(default=None),
+        authorization: Optional[str] = Header(default=None),
     ) -> UserContext:
-        ctx = _parse_user(x_user_id, x_user_role)
+        ctx = _parse_token(authorization)
         if ctx.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -62,8 +71,7 @@ def require_role(*allowed_roles: Role):
 
 
 async def get_user_context(
-    x_user_id: Optional[str] = Header(default=None),
-    x_user_role: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ) -> UserContext:
-    """Dependency: parse user from headers without role restriction."""
-    return _parse_user(x_user_id, x_user_role)
+    """Dependency: parse user from token without role restriction."""
+    return _parse_token(authorization)

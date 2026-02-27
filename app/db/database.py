@@ -1,15 +1,23 @@
-"""SQLAlchemy database setup with SQLite for local dev."""
+"""SQLAlchemy database setup.
+
+- If DATABASE_URL env var is set, uses Postgres (production / Railway / Render).
+- Otherwise falls back to SQLite for local dev.
+"""
+import os
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATABASE_URL = "sqlite:///./ops_orchestrator.db"
+_DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./ops_orchestrator.db")
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    echo=False,
-)
+# Railway (and some other hosts) emit postgres:// which SQLAlchemy 1.4+ requires
+# as postgresql://.
+if _DATABASE_URL.startswith("postgres://"):
+    _DATABASE_URL = _DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+_connect_args = {"check_same_thread": False} if _DATABASE_URL.startswith("sqlite") else {}
+
+engine = create_engine(_DATABASE_URL, connect_args=_connect_args, echo=False)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -27,6 +35,5 @@ def get_db():
 
 def init_db():
     """Create all tables. Call on startup."""
-    # Import models to register them with Base metadata
-    from app.models.orm import OpsRequest, AuditLog, ApprovalRecord  # noqa: F401
+    from app.models.orm import OpsRequest, AuditLog, ApprovalRecord, User  # noqa: F401
     Base.metadata.create_all(bind=engine)

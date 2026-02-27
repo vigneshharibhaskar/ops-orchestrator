@@ -9,12 +9,40 @@ from app.db import init_db
 from app.routers import requests as requests_router
 from app.routers import approvals as approvals_router
 from app.routers import demo as demo_router
+from app.routers import auth as auth_router
+
+
+def _seed_users() -> None:
+    """Create default dev users if the users table is empty.
+
+    DEV ONLY — passwords are hardcoded. Set real credentials via env in production.
+    """
+    import bcrypt
+    from app.db.database import SessionLocal
+    from app.models.orm import User
+
+    _SEED = [
+        ("alice@acme-fintech.com", "password123", "requester"),
+        ("compliance@acme-fintech.com", "password123", "approver"),
+        ("admin@acme-fintech.com", "password123", "admin"),
+    ]
+
+    db = SessionLocal()
+    try:
+        if db.query(User).count() == 0:
+            for email, password, role in _SEED:
+                pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+                db.add(User(email=email, password_hash=pw_hash, role=role))
+            db.commit()
+    finally:
+        db.close()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize DB tables on startup."""
+    """Initialize DB tables and seed dev users on startup."""
     init_db()
+    _seed_users()
     yield
 
 
@@ -30,6 +58,7 @@ app = FastAPI(
 )
 
 # ── Routers ────────────────────────────────────────────────────────────────────
+app.include_router(auth_router.router)
 app.include_router(requests_router.router)
 app.include_router(approvals_router.router)
 app.include_router(demo_router.router)

@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -43,12 +44,15 @@ def _hash_input(data: Dict[str, Any]) -> str:
 
 
 def _tool_dispatch(tool: str, action: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Route to the correct mocked tool adapter."""
+    """Route to the correct mocked tool adapter. Adds execution_duration_ms."""
+    _base = {"tool_name": tool, "action_name": action}
+
     if not is_allowed(tool, action):
+        msg = f"Action '{action}' on tool '{tool}' is not in the approved catalog"
         return {
             "tool": tool, "action": action, "ok": False,
-            "data": {"error": f"Action '{action}' on tool '{tool}' is not in the approved catalog"},
-            "mock": True,
+            "data": {"error": msg}, "mock": True,
+            "execution_duration_ms": 0, "error": msg, **_base,
         }
     adapters = {
         "slack": slack_adapter,
@@ -56,11 +60,21 @@ def _tool_dispatch(tool: str, action: str, args: Dict[str, Any]) -> Dict[str, An
     }
     adapter = adapters.get(tool.lower())
     if adapter is None:
+        msg = f"Unknown tool: {tool}"
         return {
             "tool": tool, "action": action, "ok": False,
-            "data": {"error": f"Unknown tool: {tool}"}, "mock": True,
+            "data": {"error": msg}, "mock": True,
+            "execution_duration_ms": 0, "error": msg, **_base,
         }
-    return adapter.execute(action, args)
+    t0 = time.monotonic()
+    result = adapter.execute(action, args)
+    elapsed_ms = round((time.monotonic() - t0) * 1000, 2)
+    return {
+        **result,
+        "execution_duration_ms": elapsed_ms,
+        "error": result.get("data", {}).get("error") if not result.get("ok") else None,
+        **_base,
+    }
 
 
 # ── Claude plan generation ─────────────────────────────────────────────────────
