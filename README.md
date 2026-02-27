@@ -16,14 +16,16 @@ POST /requests
     ├─ LOW/MEDIUM risk ──→ auto-execute (Slack + GitHub adapters)
     │                        └─ status: COMPLETED
     │
-    └─ HIGH/HUMAN_ONLY ──→ in-memory ApprovalQueue
+    └─ HIGH/HUMAN_ONLY ──→ in-memory ApprovalQueue*
                             └─ status: AWAITING_APPROVAL
                                 │
                             POST /approvals/{id}/approve
                                 └─ execute all steps → COMPLETED
 ```
 
-**RBAC roles** (via request headers):
+*The queue is intentionally in-memory for MVP simplicity; in production this layer swaps to a durable queue (Redis Streams / SQS) without changing orchestration logic.
+
+**RBAC roles** (enforced via JWT claims):
 
 | Role       | Can submit | Can approve/reject | Can read |
 |------------|-----------|-------------------|---------|
@@ -51,7 +53,7 @@ Without a key, the orchestrator falls back to a deterministic stub planner — f
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### 3. Run the server
+### 3. Run the backend
 
 ```bash
 uvicorn app.main:app --reload
@@ -59,16 +61,28 @@ uvicorn app.main:app --reload
 
 API docs: http://localhost:8000/docs
 
+### 4. Run the frontend
+
+```bash
+cd web
+cp .env.local.example .env.local   # edit NEXT_PUBLIC_API_BASE_URL if needed
+npm install
+npm run dev
+```
+
+Frontend: http://localhost:3000 — log in with any seeded account (password: `password123`)
+
 ---
 
 ## Endpoints
+
+Get a token first (or use `export TOKEN=$(curl -s -X POST http://localhost:8000/auth/login -H "Content-Type: application/json" -d '{"email":"alice@acme-fintech.com","password":"password123"}' | jq -r .access_token)`).
 
 ### `POST /requests` — Submit an ops request
 ```bash
 curl -s -X POST http://localhost:8000/requests \
   -H "Content-Type: application/json" \
-  -H "X-User-ID: alice@acme-fintech.com" \
-  -H "X-User-Role: requester" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{
     "idempotency_key": "provision-analyst-2891",
     "requester_id": "alice@acme-fintech.com",
@@ -89,18 +103,20 @@ curl -s -X POST http://localhost:8000/requests \
 ### `GET /requests/{id}` — Fetch request status
 ```bash
 curl -s http://localhost:8000/requests/<ID> \
-  -H "X-User-ID: alice@acme-fintech.com" \
-  -H "X-User-Role: requester" | jq .
+  -H "Authorization: Bearer $TOKEN" | jq .
 ```
 
 ---
 
 ### `POST /approvals/{id}/approve` — Approve a pending request
 ```bash
+export APPROVER_TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"compliance@acme-fintech.com","password":"password123"}' | jq -r .access_token)
+
 curl -s -X POST http://localhost:8000/approvals/<ID>/approve \
   -H "Content-Type: application/json" \
-  -H "X-User-ID: compliance@acme-fintech.com" \
-  -H "X-User-Role: approver" \
+  -H "Authorization: Bearer $APPROVER_TOKEN" \
   -d '{"approver_id": "compliance@acme-fintech.com", "reason": "Background check complete; line manager confirmed via JIRA-2891; role entitlement verified"}' | jq .
 ```
 
@@ -110,8 +126,7 @@ curl -s -X POST http://localhost:8000/approvals/<ID>/approve \
 ```bash
 curl -s -X POST http://localhost:8000/approvals/<ID>/reject \
   -H "Content-Type: application/json" \
-  -H "X-User-ID: compliance@acme-fintech.com" \
-  -H "X-User-Role: approver" \
+  -H "Authorization: Bearer $APPROVER_TOKEN" \
   -d '{"approver_id": "compliance@acme-fintech.com", "reason": "Requested permission level exceeds approved role entitlement for this environment"}' | jq .
 ```
 
@@ -123,6 +138,27 @@ curl -s -X POST http://localhost:8000/demo/onboard | jq .
 ```
 
 Runs a full analyst onboarding scenario: adds the new hire to the GitHub org and sends a Slack welcome message. The request lands in `AWAITING_APPROVAL` because org membership changes are HIGH risk and require compliance sign-off. Copy the `id` and run the approve command above to complete execution.
+
+---
+
+## Human Role in the Loop
+
+The human approver is responsible for:
+- Authorizing irreversible or high-blast-radius access changes
+- Providing written justification for HUMAN_ONLY decisions
+- Applying contextual judgment beyond system-visible inputs
+
+The system may recommend and prepare changes, but it never executes HUMAN_ONLY actions without explicit human approval.
+
+---
+
+## Critical Human Decision
+
+> **Production access changes — granting admin, infra-level, or org-wide permissions — must remain human-authorized.**
+>
+> Blast radius is unbounded. Regulatory liability is real. And these changes are irreversible without explicit rollback. No automation shortcut justifies removing the human from this decision.
+
+This is not a configuration option. It is a hard architectural constraint enforced at the risk layer, before any LLM output is trusted.
 
 ---
 
@@ -171,28 +207,42 @@ ops-orchestrator/
 ├── app/
 │   ├── main.py                     # FastAPI app, lifespan, global handlers
 │   ├── models/
-│   │   ├── orm.py                  # SQLAlchemy: OpsRequest, AuditLog, ApprovalRecord
-│   │   └── schemas.py              # Pydantic: TaskPlan, TaskStep, responses
+│   │   ├── orm.py                  # SQLAlchemy: OpsRequest, AuditLog, ApprovalRecord, User
+│   │   └── schemas.py              # Pydantic: TaskPlan, TaskStep, responses, auth
 │   ├── db/
-│   │   └── database.py             # SQLite engine, get_db(), init_db()
+│   │   └── database.py             # SQLite/Postgres engine, get_db(), init_db()
 │   ├── auth/
-│   │   └── rbac.py                 # Header-based RBAC, require_role() dependency
+│   │   ├── jwt.py                  # HS256 token creation + verification
+│   │   └── rbac.py                 # JWT-based RBAC, require_role() dependency
 │   ├── queue/
-│   │   └── memory_queue.py         # In-memory Redis-like approval queue
+│   │   └── memory_queue.py         # In-memory approval queue
 │   ├── services/
 │   │   ├── orchestrator.py         # Main pipeline (submit/approve/reject)
 │   │   └── risk.py                 # Deterministic rule-based risk engine
 │   ├── tools/
-│   │   ├── slack.py                # Mocked Slack adapter (send_message, invite)
-│   │   └── github.py               # Mocked GitHub adapter (add_to_org, create_pr)
+│   │   ├── slack.py                # Mocked Slack adapter
+│   │   └── github.py               # Mocked GitHub adapter
 │   ├── observability/
 │   │   └── logger.py               # Structured JSON logger + DB audit writer
 │   └── routers/
-│       ├── requests.py             # POST /requests, GET /requests/{id}
-│       ├── approvals.py            # POST /approvals/{id}/approve|reject
+│       ├── auth.py                 # POST /auth/register|login
+│       ├── requests.py             # POST /requests, GET /requests, GET /requests/{id}
+│       ├── approvals.py            # GET /approvals/pending, POST /approvals/{id}/approve|reject
 │       └── demo.py                 # POST /demo/onboard
+├── web/                            # Next.js 15 + Tailwind frontend
+│   ├── src/
+│   │   ├── lib/
+│   │   │   ├── api.ts              # Typed API client (auto-attaches Bearer token)
+│   │   │   └── Layout.tsx          # Shared nav, route guard, Badge/Spinner components
+│   │   └── app/
+│   │       ├── login/page.tsx      # Login form + seeded account helper
+│   │       ├── page.tsx            # Dashboard: submit form + recent requests table
+│   │       ├── approvals/page.tsx  # Pending approvals list + approve/reject modal
+│   │       └── requests/[request_id]/page.tsx  # Request detail with live polling
+│   └── .env.local.example
 └── tests/
-    ├── conftest.py                 # TestClient + in-memory SQLite fixtures
+    ├── conftest.py                 # TestClient + JWT fixtures
+    ├── test_auth.py                # Auth endpoint tests
     ├── test_idempotency.py         # Duplicate key rejection tests
     └── test_approval.py            # Approval gating + RBAC enforcement tests
 ```
@@ -291,6 +341,15 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT
 
 Same steps — add a Postgres database service, copy the internal DSN to `DATABASE_URL`, set `JWT_SECRET`, and use the start command above.
 
+### Frontend (Vercel / Netlify / Railway static)
+
+```bash
+cd web
+npm run build   # output: .next/
+```
+
+Set `NEXT_PUBLIC_API_BASE_URL` to your deployed backend URL (e.g. `https://ops-orchestrator.up.railway.app`). No other env vars required for the frontend.
+
 ---
 
 ## What Breaks First at Scale
@@ -320,3 +379,7 @@ Same steps — add a Postgres database service, copy the internal DSN to `DATABA
 **Risk:** Approvers rubber-stamp HUMAN_ONLY requests without meaningful review because the UI makes approval a single click. The human gate becomes theatre.
 
 **Mitigation (implemented):** `approve_request` requires `decision_reason` ≥ 20 characters for any request with `overall_risk = HUMAN_ONLY`. This is enforced server-side — no role (including admin) can bypass it. The reason is stored on `ApprovalRecord.reason` and included in the `REQUEST_APPROVED` audit log metadata, creating a written paper trail for each high-stakes decision.
+
+---
+
+*Ops Orchestrator demonstrates how AI can expand operational throughput without expanding operational authority.*
