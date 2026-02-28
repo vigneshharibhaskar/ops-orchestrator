@@ -28,6 +28,18 @@ TOOL_CATALOG: Dict[str, FrozenSet[str]] = {
         "create_repo",
         "create_branch",
     }),
+    "okta": frozenset({
+        "provision_user",
+        "deactivate_user",
+    }),
+    "google_workspace": frozenset({
+        "create_user",
+        "suspend_user",
+    }),
+    "vpn": frozenset({
+        "grant_access",
+        "revoke_access",
+    }),
 }
 
 

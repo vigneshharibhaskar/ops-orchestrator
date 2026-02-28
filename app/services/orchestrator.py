@@ -32,6 +32,9 @@ from app.observability.logger import audit
 from app.queue.memory_queue import approval_queue
 from app.tools import slack as slack_adapter
 from app.tools import github as github_adapter
+from app.tools import okta as okta_adapter
+from app.tools import google_workspace as google_workspace_adapter
+from app.tools import vpn as vpn_adapter
 from app.tools.catalog import is_allowed
 from app.services import injection as injection_service
 
@@ -57,6 +60,9 @@ def _tool_dispatch(tool: str, action: str, args: Dict[str, Any]) -> Dict[str, An
     adapters = {
         "slack": slack_adapter,
         "github": github_adapter,
+        "okta": okta_adapter,
+        "google_workspace": google_workspace_adapter,
+        "vpn": vpn_adapter,
     }
     adapter = adapters.get(tool.lower())
     if adapter is None:

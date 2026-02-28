@@ -4,22 +4,34 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+export function useRole(): string {
+  const [role, setRole] = useState("");
+  useEffect(() => {
+    setRole(localStorage.getItem("role") ?? "");
+  }, []);
+  return role;
+}
+
 export default function Layout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [ready, setReady] = useState(false);
+  const [role, setRole] = useState("");
 
   useEffect(() => {
     const tok = localStorage.getItem("token");
     if (!tok) {
       router.replace("/login");
     } else {
+      setRole(localStorage.getItem("role") ?? "");
       setReady(true);
     }
   }, [router]);
 
   function logout() {
     localStorage.removeItem("token");
+    localStorage.removeItem("role");
+    localStorage.removeItem("email");
     router.replace("/login");
   }
 
@@ -38,13 +50,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     </Link>
   );
 
+  const canApprove = role === "approver" || role === "admin";
+  const isAdmin = role === "admin";
+
   return (
     <div className="min-h-screen flex flex-col">
       <nav className="bg-indigo-800 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-4">
           <span className="text-white font-semibold mr-4">Ops Orchestrator</span>
           {navLink("/", "Dashboard")}
-          {navLink("/approvals", "Approvals")}
+          {canApprove && navLink("/approvals", "Approvals")}
+          {isAdmin && navLink("/hr", "HR Events")}
           <button
             onClick={logout}
             className="ml-auto text-indigo-200 hover:text-white text-sm transition-colors"

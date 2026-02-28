@@ -2,11 +2,17 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import Layout, { RiskBadge, StatusBadge, ErrorMsg, Spinner } from "@/lib/Layout";
-import { requests, type OpsRequest, type Role } from "@/lib/api";
+import Layout, { useRole, RiskBadge, StatusBadge, ErrorMsg, Spinner } from "@/lib/Layout";
+import { requests, type OpsRequest } from "@/lib/api";
 
-const INTENTS = [
+// Requesters get low-blast-radius intents only
+const REQUESTER_INTENTS = [
+  "provision_repository_access",
+  "onboard_user",
+  "invite_to_channel",
+];
+
+const ALL_INTENTS = [
   "provision_repository_access",
   "onboard_user",
   "invite_to_channel",
@@ -51,18 +57,22 @@ function genKey() {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const role = useRole();
+  const canSeeRisk = role === "approver" || role === "admin";
+  const availableIntents = canSeeRisk ? ALL_INTENTS : REQUESTER_INTENTS;
+
   const [reqs, setReqs] = useState<OpsRequest[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState("");
 
   // form state
-  const [intent, setIntent] = useState(INTENTS[0]);
+  const [intent, setIntent] = useState(availableIntents[0]);
   const [payloadText, setPayloadText] = useState(
-    JSON.stringify(PAYLOAD_EXAMPLES[INTENTS[0]], null, 2)
+    JSON.stringify(PAYLOAD_EXAMPLES[availableIntents[0]], null, 2)
   );
-  const [idemKey, setIdemKey] = useState(genKey());
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const [successId, setSuccessId] = useState<string | null>(null);
 
   const fetchList = useCallback(async () => {
     try {
@@ -88,6 +98,7 @@ export default function DashboardPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setFormError("");
+    setSuccessId(null);
 
     let payload: Record<string, unknown> = {};
     try {
@@ -97,22 +108,18 @@ export default function DashboardPage() {
       return;
     }
 
-    const role = (localStorage.getItem("role") ?? "requester") as Role;
-    const email = localStorage.getItem("email") ?? "user@acme-fintech.com";
-
     setSubmitting(true);
     try {
-      const key = idemKey.trim() || genKey();
       const res = await requests.submit({
-        idempotency_key: key,
-        requester_id: email,
-        role,
+        idempotency_key: genKey(),
         intent,
         payload,
       });
-      router.push(`/requests/${res.id}`);
+      setSuccessId(res.id);
+      fetchList();
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : "Submit failed");
+    } finally {
       setSubmitting(false);
     }
   }
@@ -131,6 +138,18 @@ export default function DashboardPage() {
               </div>
             )}
 
+            {successId && (
+              <div className="mb-4 rounded-md bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700 flex items-center justify-between">
+                <span>Request submitted successfully.</span>
+                <button
+                  onClick={() => router.push(`/requests/${successId}`)}
+                  className="ml-3 text-green-700 underline text-xs whitespace-nowrap"
+                >
+                  View details
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -141,7 +160,7 @@ export default function DashboardPage() {
                   onChange={(e) => handleIntentChange(e.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
                 >
-                  {INTENTS.map((i) => (
+                  {availableIntents.map((i) => (
                     <option key={i} value={i}>
                       {i}
                     </option>
@@ -159,30 +178,6 @@ export default function DashboardPage() {
                   onChange={(e) => setPayloadText(e.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y"
                 />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Idempotency Key
-                  <span className="text-gray-400 font-normal ml-1">
-                    (optional)
-                  </span>
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={idemKey}
-                    onChange={(e) => setIdemKey(e.target.value)}
-                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setIdemKey(genKey())}
-                    className="px-3 py-2 text-xs rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
-                  >
-                    Regen
-                  </button>
-                </div>
               </div>
 
               <button
@@ -225,7 +220,9 @@ export default function DashboardPage() {
                       <th className="pb-2 pr-3 font-medium">Created</th>
                       <th className="pb-2 pr-3 font-medium">Intent</th>
                       <th className="pb-2 pr-3 font-medium">Status</th>
-                      <th className="pb-2 pr-3 font-medium">Risk</th>
+                      {canSeeRisk && (
+                        <th className="pb-2 pr-3 font-medium">Risk</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
@@ -236,7 +233,7 @@ export default function DashboardPage() {
                         onClick={() => router.push(`/requests/${r.id}`)}
                       >
                         <td className="py-2 pr-3 text-xs text-gray-500 whitespace-nowrap">
-                          {new Date(r.created_at).toLocaleString()}
+                          {new Date(r.created_at.endsWith("Z") || r.created_at.includes("+") ? r.created_at : r.created_at + "Z").toLocaleString()}
                         </td>
                         <td className="py-2 pr-3 font-mono text-xs max-w-[160px] truncate">
                           {r.intent}
@@ -244,9 +241,11 @@ export default function DashboardPage() {
                         <td className="py-2 pr-3">
                           <StatusBadge status={r.status} />
                         </td>
-                        <td className="py-2">
-                          <RiskBadge level={r.risk_level} />
-                        </td>
+                        {canSeeRisk && (
+                          <td className="py-2">
+                            <RiskBadge level={r.risk_level} />
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

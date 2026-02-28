@@ -173,8 +173,6 @@ export const requests = {
 
   submit: (body: {
     idempotency_key: string;
-    requester_id: string;
-    role: Role;
     intent: string;
     payload: Record<string, unknown>;
   }) =>
@@ -208,6 +206,33 @@ export const approvals = {
     request(`/approvals/${request_id}/reject`, {
       method: "POST",
       body: JSON.stringify({ approver_id: "from-jwt", reason }),
+    }),
+};
+
+// ── HR Events ─────────────────────────────────────────────────────────────────
+
+export interface HRActionSummary {
+  request_id: string;
+  system: string;
+  action: string;
+  risk: string;
+  status: string;
+}
+
+export interface HREventResponse {
+  event_id: string;
+  employee: string;
+  total_actions: number;
+  auto_executing: number;
+  awaiting_approval: number;
+  actions: HRActionSummary[];
+}
+
+export const hrEvents = {
+  submit: (event: Record<string, unknown>) =>
+    request<HREventResponse>("/hr/events", {
+      method: "POST",
+      body: JSON.stringify({ event }),
     }),
 };
 

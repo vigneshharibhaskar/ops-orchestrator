@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from datetime import date, datetime
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator
@@ -39,7 +39,7 @@ class RequestStatus(str, Enum):
 
 class OpsRequestCreate(BaseModel):
     idempotency_key: str = Field(..., min_length=1, max_length=255)
-    requester_id: str = Field(..., min_length=1, max_length=255)
+    requester_id: str = Field(default="", max_length=255)  # always overwritten from JWT
     role: Role = Role.REQUESTER
     intent: str = Field(..., min_length=1, max_length=255)
     payload: Dict[str, Any] = Field(default_factory=dict)
@@ -175,6 +175,41 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     role: str
+
+
+# ── HR event schemas ─────────────────────────────────────────────────────────
+
+
+class NewHireEvent(BaseModel):
+    type: Literal["new_hire"]
+    name: str = Field(..., min_length=1, max_length=255)
+    email: str = Field(..., min_length=1, max_length=255)
+    department: str = Field(..., min_length=1, max_length=255)
+    start_date: date
+
+
+class RoleChangeEvent(BaseModel):
+    type: Literal["role_change"]
+    email: str = Field(..., min_length=1, max_length=255)
+    old_department: str = Field(..., min_length=1, max_length=255)
+    new_department: str = Field(..., min_length=1, max_length=255)
+    new_title: str = Field(..., min_length=1, max_length=255)
+
+
+class TerminationEvent(BaseModel):
+    type: Literal["termination"]
+    email: str = Field(..., min_length=1, max_length=255)
+    last_day: date
+
+
+HREventBody = Annotated[
+    Union[NewHireEvent, RoleChangeEvent, TerminationEvent],
+    Field(discriminator="type"),
+]
+
+
+class HREventRequest(BaseModel):
+    event: HREventBody
 
 
 # ── Approval queue summary ───────────────────────────────────────────────────
