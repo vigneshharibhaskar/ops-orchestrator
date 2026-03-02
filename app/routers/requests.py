@@ -9,7 +9,7 @@ from app.db import get_db
 from app.models.orm import OpsRequest, AuditLog
 from app.models.schemas import (
     OpsRequestCreate, OpsRequestResponse, ErrorResponse,
-    TaskPlan, ClarificationSubmit, AuditLogResponse,
+    TaskPlan, ClarificationSubmit, AuditLogResponse, ApprovalInfo,
 )
 from app.services import orchestrator
 from app.services.orchestrator import DuplicateRequestError
@@ -21,6 +21,14 @@ def _serialize(req: OpsRequest) -> OpsRequestResponse:
     plan = None
     if req.task_plan:
         plan = TaskPlan(**req.task_plan)
+    approval = None
+    if req.approval:
+        approval = ApprovalInfo(
+            approver_id=req.approval.approver_id,
+            decision=req.approval.decision,
+            reason=req.approval.reason,
+            decided_at=req.approval.decided_at,
+        )
     return OpsRequestResponse(
         id=req.id,
         correlation_id=req.correlation_id,
@@ -38,6 +46,7 @@ def _serialize(req: OpsRequest) -> OpsRequestResponse:
         error_message=req.error_message,
         policy_version=req.policy_version,
         prompt_version=req.prompt_version,
+        approval=approval,
         created_at=req.created_at,
         updated_at=req.updated_at,
     )
@@ -49,7 +58,7 @@ def _serialize(req: OpsRequest) -> OpsRequestResponse:
     responses={403: {"model": ErrorResponse}},
 )
 def list_requests(
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=500),
     db: Session = Depends(get_db),
     user: UserContext = Depends(require_role(Role.REQUESTER, Role.APPROVER, Role.ADMIN, Role.HR)),
 ):

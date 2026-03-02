@@ -91,6 +91,12 @@ def ingest_hr_event(
             "action": access_action.action,
             "risk": access_action.risk.value,
             "reason": access_action.reason,
+            # Explicit mappings prevent NEEDS_CLARIFICATION in the orchestrator:
+            # the stub plan looks for user_email / repo / permission by name.
+            "user_email": event_data.get("email", ""),
+            "full_name": event_data.get("name", ""),
+            "permission": event_data.get("permission", "member"),
+            "repo": access_action.system,   # system-level grant, no specific repo
             **event_data,
         }
 

@@ -106,6 +106,10 @@ def _build_email_to_dept(reqs: List[OpsRequest]) -> Dict[str, str]:
     new_hire events have payload["department"].
     role_change events have payload["new_department"].
     Last assignment (by created_at ASC) wins.
+
+    Processes the supplied list, which should include ALL statuses (not just
+    COMPLETED) so that pending/awaiting-approval HR events still contribute
+    department information.
     """
     dept_map: Dict[str, str] = {}
     for req in reqs:
@@ -123,19 +127,23 @@ def scan(db: Session, email: Optional[str] = None) -> List[DriftItem]:
     """Compute drift items for one user (if email given) or all users."""
     now = datetime.utcnow()
 
-    # Fetch all COMPLETED OpsRequests sorted oldest-first for replay
-    query = (
+    # Fetch all COMPLETED OpsRequests sorted oldest-first for access replay
+    completed_reqs = (
         db.query(OpsRequest)
         .filter(OpsRequest.status == RequestStatus.COMPLETED)
         .order_by(OpsRequest.created_at)
+        .all()
     )
-    if email:
-        # Fast-path: only need requests relevant to this email
-        # Still fetch all (JSON filtering in Python; SQLite has no JSON path index)
-        pass
-    all_reqs = query.all()
 
-    actual_access = _build_actual_access(all_reqs)
+    # Fetch ALL OpsRequests (any status) for department lookup so that pending
+    # or awaiting-approval HR events still contribute department information.
+    all_reqs = (
+        db.query(OpsRequest)
+        .order_by(OpsRequest.created_at)
+        .all()
+    )
+
+    actual_access = _build_actual_access(completed_reqs)
     email_to_dept = _build_email_to_dept(all_reqs)
 
     # Filter to target email if specified
@@ -146,7 +154,8 @@ def scan(db: Session, email: Optional[str] = None) -> List[DriftItem]:
     items: List[DriftItem] = []
 
     for user_email in sorted(emails_to_scan):
-        dept = email_to_dept.get(user_email)
+        dept = email_to_dept.get(user_email)          # lowercase key for policy lookup
+        dept_display = dept.capitalize() if dept else None  # "Engineering", "Finance", …
         expected: Set[str] = set(_POLICY.get(dept, [])) if dept else set()
         actual: Dict[str, OpsRequest] = actual_access.get(user_email, {})
         actual_systems: Set[str] = set(actual.keys())
@@ -167,7 +176,7 @@ def scan(db: Session, email: Optional[str] = None) -> List[DriftItem]:
                 last_grant_id=grant_req.id,
                 last_grant_date=grant_req.created_at.isoformat(),
                 days_since_grant=days,
-                department=dept,
+                department=dept_display,
             ))
 
         # ── Missing ───────────────────────────────────────────────────────────
@@ -182,7 +191,7 @@ def scan(db: Session, email: Optional[str] = None) -> List[DriftItem]:
                     last_grant_id=None,
                     last_grant_date=None,
                     days_since_grant=None,
-                    department=dept,
+                    department=dept_display,
                 ))
 
         # ── Stale ─────────────────────────────────────────────────────────────
@@ -203,7 +212,7 @@ def scan(db: Session, email: Optional[str] = None) -> List[DriftItem]:
                     last_grant_id=grant_req.id,
                     last_grant_date=grant_req.created_at.isoformat(),
                     days_since_grant=days,
-                    department=dept,
+                    department=dept_display,
                 ))
 
     return items

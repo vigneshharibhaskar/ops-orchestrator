@@ -622,8 +622,10 @@ def _risk_and_route(
         db.commit()
 
         results = _execute_steps(assessment.annotated_steps)
+        any_failed = any(r.get("ok") is False for r in results)
+        final_status = RequestStatus.FAILED if any_failed else RequestStatus.COMPLETED
         ops_request.execution_results = results
-        ops_request.status = RequestStatus.COMPLETED
+        ops_request.status = final_status
         ops_request.updated_at = datetime.utcnow()
         db.commit()
 
@@ -633,7 +635,7 @@ def _risk_and_route(
             actor="system",
             action="AUTO_EXECUTED",
             input_hash=input_hash,
-            decision="COMPLETED",
+            decision=final_status.value,
             metadata={"results_count": len(results), **_trace(ops_request, plan)},
         )
     else:
@@ -750,8 +752,10 @@ def approve_request(
         result = _tool_dispatch(step.tool, step.action, step.args)
         results.append({"step": step.step, "name": step.name, **result})
 
+    any_failed = any(r.get("ok") is False for r in results)
+    final_status = RequestStatus.FAILED if any_failed else RequestStatus.COMPLETED
     ops_request.execution_results = results
-    ops_request.status = RequestStatus.COMPLETED
+    ops_request.status = final_status
     ops_request.updated_at = datetime.utcnow()
     db.commit()
 
@@ -761,7 +765,7 @@ def approve_request(
         actor="system",
         action="APPROVED_EXECUTION_COMPLETE",
         input_hash=ops_request.input_hash,
-        decision="COMPLETED",
+        decision=final_status.value,
         metadata={"results_count": len(results), **_plan_trace},
     )
 

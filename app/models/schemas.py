@@ -107,6 +107,15 @@ class TaskPlan(BaseModel):
 # ── Response schemas ─────────────────────────────────────────────────────────
 
 
+class ApprovalInfo(BaseModel):
+    approver_id: Optional[str] = None
+    decision: Optional[str] = None
+    reason: Optional[str] = None
+    decided_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
 class OpsRequestResponse(BaseModel):
     id: str
     correlation_id: str
@@ -127,6 +136,7 @@ class OpsRequestResponse(BaseModel):
     expires_at: Optional[datetime] = None
     auto_revoked: bool = False
     revoke_request_id: Optional[str] = None
+    approval: Optional[ApprovalInfo] = None
     created_at: datetime
     updated_at: datetime
 

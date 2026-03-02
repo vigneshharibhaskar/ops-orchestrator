@@ -1,6 +1,6 @@
-# Ops Orchestrator — Internal Access & Workflow Automation
+# Ops Orchestrator
 
-AI-native backend for access provisioning and operational change management in regulated financial services. Accepts requests in natural language, generates auditable execution plans via Claude, applies deterministic risk gating aligned to change-management policy, and routes sensitive changes through a mandatory human approval queue.
+AI-native access provisioning and operational change management for regulated financial services. Natural-language requests are planned by Claude, gated through a deterministic risk engine, and either auto-executed or routed to a mandatory human approval queue — with every decision stamped, versioned, and auditable.
 
 ---
 
@@ -9,59 +9,77 @@ AI-native backend for access provisioning and operational change management in r
 ```
 POST /requests
     │
-    ├─ 1. Idempotency check (SQLite)
-    ├─ 2. Claude (claude-haiku) → structured TaskPlan JSON
-    ├─ 3. Deterministic risk engine (rule-based, no LLM)
+    ├─ 1. Idempotency check (SQLite / Postgres)
+    ├─ 2. Claude (claude-haiku) → structured TaskPlan JSON   [PROMPT_VERSION stamped]
+    ├─ 3. Deterministic risk engine (rule-based, no LLM)     [POLICY_VERSION stamped]
     │
-    ├─ LOW/MEDIUM risk ──→ auto-execute (Slack + GitHub adapters)
-    │                        └─ status: COMPLETED
+    ├─ LOW / MEDIUM ──→ auto-execute → COMPLETED
     │
-    └─ HIGH/HUMAN_ONLY ──→ in-memory ApprovalQueue*
-                            └─ status: AWAITING_APPROVAL
-                                │
-                            POST /approvals/{id}/approve
-                                └─ execute all steps → COMPLETED
+    └─ HIGH / HUMAN_ONLY ──→ ApprovalQueue → AWAITING_APPROVAL
+                              │
+                          POST /approvals/{id}/approve
+                              └─ execute all steps → COMPLETED
 ```
 
-*The queue is intentionally in-memory for MVP simplicity; in production this layer swaps to a durable queue (Redis Streams / SQS) without changing orchestration logic.
+**RBAC roles** (enforced via JWT claims, not headers):
 
-**RBAC roles** (enforced via JWT claims):
+| Role       | Submit requests | Approve / Reject | HR events | Admin dashboard |
+|------------|:--------------:|:----------------:|:---------:|:---------------:|
+| requester  | ✅ | ❌ | ❌ | ❌ |
+| approver   | ❌ | ✅ | ❌ | ❌ |
+| hr         | ❌ | ❌ | ✅ | ❌ |
+| admin      | ✅ | ✅ | ✅ | ✅ |
 
-| Role       | Can submit | Can approve/reject | Can read |
-|------------|-----------|-------------------|---------|
-| requester  | ✅        | ❌                | ✅      |
-| approver   | ❌        | ✅                | ✅      |
-| admin      | ✅        | ✅                | ✅      |
+---
+
+## Features
+
+### Request Pipeline
+Submit an ops request in plain language. Claude generates a structured execution plan; the risk engine classifies each step. Low and medium risk requests execute automatically. High risk and human-only requests enter a human approval queue with mandatory written justification (≥ 20 characters, enforced server-side).
+
+### Approvals
+Approvers see a live pending queue with full request context — intent, AI plan, risk classification, and clarification history. Each approve/reject action requires a written reason that is stored in the audit trail. A History tab shows all decided requests with outcome and approver.
+
+### HR Events
+HR submits lifecycle events (new hire, role change, termination) through a structured form. The policy engine derives the correct access actions for each event and the employee's department, then queues them through the standard request pipeline. An Event History tab shows all submitted events grouped by employee, with a slide-out panel showing per-system status and approval outcomes.
+
+### Drift Detection
+Compares actual provisioning records against HR department policy to surface three classes of anomaly:
+
+| Type | Meaning | Severity |
+|------|---------|----------|
+| Unexpected | Access exists with no policy justification for current department | HIGH |
+| Missing | Policy requires access but no grant record exists | MEDIUM |
+| Stale | Access was legitimately granted but is over 90 days old | LOW |
+
+Results include one-click Revoke (unexpected) and Grant (missing) actions.
+
+### Admin Dashboard
+Admins land on a live system overview — pending approval count, drift findings, auto-revocations in the last 24 hours, and total requests today — with alert banners for aging queues and open drift findings.
+
+### Access Expiry
+A background thread polls every 60 seconds for grants with an `expires_at` timestamp that have passed, and fires `auto_revoke` for each — no manual intervention needed.
 
 ---
 
 ## Quick Start
 
-### 1. Install dependencies
+### 1. Backend
 
 ```bash
 cd ops-orchestrator
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
 
-### 2. (Optional) Set Claude API key
-
-Without a key, the orchestrator falls back to a deterministic stub planner — fully functional for local dev and tests.
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-### 3. Run the backend
-
-```bash
+cp .env.example .env   # set JWT_SECRET; optionally set ANTHROPIC_API_KEY
 uvicorn app.main:app --reload
 ```
 
+Without `ANTHROPIC_API_KEY`, the orchestrator falls back to a deterministic stub planner — fully functional for local dev and tests.
+
 API docs: http://localhost:8000/docs
 
-### 4. Run the frontend
+### 2. Frontend
 
 ```bash
 cd web
@@ -70,23 +88,37 @@ npm install
 npm run dev
 ```
 
-Frontend: http://localhost:3000 — log in with any seeded account (password: `password123`)
+Frontend: http://localhost:3000
+
+### 3. Seed accounts (created automatically on first startup)
+
+| Email | Role | Password |
+|---|---|---|
+| alice@acme-fintech.com | requester | password123 |
+| compliance@acme-fintech.com | approver | password123 |
+| hr@acme-fintech.com | hr | password123 |
+| admin@acme-fintech.com | admin | password123 |
+
+> Seed accounts use a hardcoded password for local development only.
 
 ---
 
-## Endpoints
+## API Reference
 
-Get a token first (or use `export TOKEN=$(curl -s -X POST http://localhost:8000/auth/login -H "Content-Type: application/json" -d '{"email":"alice@acme-fintech.com","password":"password123"}' | jq -r .access_token)`).
+Get a token first:
+```bash
+export TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"alice@acme-fintech.com","password":"password123"}' | jq -r .access_token)
+```
 
-### `POST /requests` — Submit an ops request
+### Submit a request
 ```bash
 curl -s -X POST http://localhost:8000/requests \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
     "idempotency_key": "provision-analyst-2891",
-    "requester_id": "alice@acme-fintech.com",
-    "role": "requester",
     "intent": "provision_repository_access",
     "payload": {
       "user_email": "j.smith@acme-fintech.com",
@@ -96,19 +128,9 @@ curl -s -X POST http://localhost:8000/requests \
   }' | jq .
 ```
 
-**Expected**: status `AWAITING_APPROVAL` (add_collaborator modifies repository access — HIGH risk)
+Expected: `AWAITING_APPROVAL` — repository access changes are HIGH risk.
 
----
-
-### `GET /requests/{id}` — Fetch request status
-```bash
-curl -s http://localhost:8000/requests/<ID> \
-  -H "Authorization: Bearer $TOKEN" | jq .
-```
-
----
-
-### `POST /approvals/{id}/approve` — Approve a pending request
+### Approve a pending request
 ```bash
 export APPROVER_TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
@@ -117,86 +139,77 @@ export APPROVER_TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
 curl -s -X POST http://localhost:8000/approvals/<ID>/approve \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $APPROVER_TOKEN" \
-  -d '{"approver_id": "compliance@acme-fintech.com", "reason": "Background check complete; line manager confirmed via JIRA-2891; role entitlement verified"}' | jq .
+  -d '{"reason": "Background check complete; line manager confirmed via JIRA-2891; role entitlement verified"}' | jq .
 ```
 
----
-
-### `POST /approvals/{id}/reject` — Reject a pending request
+### Submit an HR lifecycle event
 ```bash
-curl -s -X POST http://localhost:8000/approvals/<ID>/reject \
+export HR_TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $APPROVER_TOKEN" \
-  -d '{"approver_id": "compliance@acme-fintech.com", "reason": "Requested permission level exceeds approved role entitlement for this environment"}' | jq .
+  -d '{"email":"hr@acme-fintech.com","password":"password123"}' | jq -r .access_token)
+
+curl -s -X POST http://localhost:8000/hr/events \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $HR_TOKEN" \
+  -d '{
+    "event": {
+      "type": "new_hire",
+      "name": "Jordan Smith",
+      "email": "j.smith@acme-fintech.com",
+      "department": "Engineering",
+      "start_date": "2026-03-10"
+    }
+  }' | jq .
 ```
 
----
+### Scan for access drift
+```bash
+curl -s "http://localhost:8000/drift/scan" \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
 
-### `POST /demo/onboard` — End-to-end demo (no auth required)
+### End-to-end demo (no auth required)
 ```bash
 curl -s -X POST http://localhost:8000/demo/onboard | jq .
 ```
 
-Runs a full analyst onboarding scenario: adds the new hire to the GitHub org and sends a Slack welcome message. The request lands in `AWAITING_APPROVAL` because org membership changes are HIGH risk and require compliance sign-off. Copy the `id` and run the approve command above to complete execution.
+---
+
+## Risk Rules
+
+| Action type | Risk | Auto-execute? |
+|---|---|---|
+| revoke_access, offboard, terminate | HUMAN_ONLY | Never |
+| Production access (target: prod/infra/security) | HUMAN_ONLY | Never |
+| Privileged access (admin/owner/org_wide) | HUMAN_ONLY | Never |
+| add_to_org, grant_access, add_collaborator, deploy | HIGH | Never |
+| Any argument referencing "prod" or "production" | HIGH | Never |
+| create_pr, create_repo, invite_to_channel | MEDIUM | Yes |
+| send_message, read-only actions | LOW | Yes |
+
+**HUMAN_ONLY gate:** Approving a HUMAN_ONLY request requires `decision_reason` ≥ 20 characters, enforced server-side. No role — including admin — can bypass this.
 
 ---
 
-## Human Role in the Loop
+## Security Properties
 
-The human approver is responsible for:
-- Authorizing irreversible or high-blast-radius access changes
-- Providing written justification for HUMAN_ONLY decisions
-- Applying contextual judgment beyond system-visible inputs
+**Prompt injection containment** — Every generated step passes through `_tool_dispatch` before execution. It rejects any `(tool, action)` pair not in `TOOL_CATALOG`. A hijacked LLM output cannot escape the allowlist; adding a new capability requires an explicit code change.
 
-The system may recommend and prepare changes, but it never executes HUMAN_ONLY actions without explicit human approval.
+**Identity from JWT only** — `requester_id` is always overwritten from the JWT `user_id` claim at the router layer. Client-supplied identity is ignored.
 
----
+**Policy and prompt versioning** — `POLICY_VERSION` (in `risk.py`) and `PROMPT_VERSION` (in `orchestrator.py`) are stamped on every `ops_requests` row and on every `PLAN_GENERATED` audit log entry. Compliance queries can filter by version to compare decisions across rule-set generations. Bumping either constant is the mandatory first step before merging policy changes.
 
-## Critical Human Decision
+**Audit trail** — Every state transition writes a row to `audit_logs`:
 
-> **Production access changes — granting admin, infra-level, or org-wide permissions — must remain human-authorized.**
->
-> Blast radius is unbounded. Regulatory liability is real. And these changes are irreversible without explicit rollback. No automation shortcut justifies removing the human from this decision.
-
-This is not a configuration option. It is a hard architectural constraint enforced at the risk layer, before any LLM output is trusted.
-
----
-
-## Risk Rules (deterministic, no LLM)
-
-| Action type                                              | Risk Level  | Auto-execute? |
-|----------------------------------------------------------|-------------|---------------|
-| revoke_access, offboard, terminate                       | HUMAN_ONLY  | Never         |
-| Production access change (target: prod/infra/security)   | HUMAN_ONLY  | Never         |
-| Privileged access change (admin/owner/org_wide role)     | HUMAN_ONLY  | Never         |
-| add_to_org, grant_access, add_collaborator, deploy       | HIGH        | Never         |
-| Any arg referencing "prod" or "production"               | HIGH        | Never         |
-| create_pr, create_repo, invite_to_channel                | MEDIUM      | Yes           |
-| send_message, read-only actions                          | LOW         | Yes           |
-
-> **HUMAN_ONLY gate:** Approving a HUMAN_ONLY decision requires a written justification of at least 20 characters. This is enforced server-side — no role, including admin, may bypass it. HUMAN_ONLY classification is determined before model reasoning is trusted, and enforced via deterministic policy checks.
-
----
-
-## Run Tests
-
-```bash
-pytest tests/ -v
-```
-
-Expected output:
-```
-tests/test_idempotency.py::test_first_request_succeeds        PASSED
-tests/test_idempotency.py::test_duplicate_key_rejected        PASSED
-tests/test_idempotency.py::test_different_keys_both_succeed   PASSED
-tests/test_idempotency.py::test_requester_role_required       PASSED
-tests/test_approval.py::test_high_risk_requires_approval      PASSED
-tests/test_approval.py::test_low_risk_auto_executes           PASSED
-tests/test_approval.py::test_approver_can_approve             PASSED
-tests/test_approval.py::test_requester_cannot_approve         PASSED
-tests/test_approval.py::test_approver_can_reject              PASSED
-tests/test_approval.py::test_double_approve_rejected          PASSED
-```
+| Field | Description |
+|---|---|
+| correlation_id | Ties all events for one request together |
+| actor | User email or "system" |
+| action | REQUEST_SUBMITTED, PLAN_GENERATED, AUTO_EXECUTED, REQUEST_APPROVED, … |
+| input_hash | SHA-256 of the original request payload |
+| decision | PLANNING / COMPLETED / AWAITING_APPROVAL |
+| created_at | When the log entry was written |
+| executed_at | When the action actually ran |
 
 ---
 
@@ -205,20 +218,24 @@ tests/test_approval.py::test_double_approve_rejected          PASSED
 ```
 ops-orchestrator/
 ├── app/
-│   ├── main.py                     # FastAPI app, lifespan, global handlers
+│   ├── main.py                     # FastAPI app, lifespan, dev seed users
 │   ├── models/
 │   │   ├── orm.py                  # SQLAlchemy: OpsRequest, AuditLog, ApprovalRecord, User
-│   │   └── schemas.py              # Pydantic: TaskPlan, TaskStep, responses, auth
+│   │   └── schemas.py              # Pydantic: TaskPlan, TaskStep, responses, ApprovalInfo
 │   ├── db/
 │   │   └── database.py             # SQLite/Postgres engine, get_db(), init_db()
 │   ├── auth/
 │   │   ├── jwt.py                  # HS256 token creation + verification
-│   │   └── rbac.py                 # JWT-based RBAC, require_role() dependency
+│   │   └── rbac.py                 # JWT-based RBAC, require_role(), Role enum
 │   ├── queue/
-│   │   └── memory_queue.py         # In-memory approval queue
+│   │   └── memory_queue.py         # In-memory approval queue (swap to Redis/SQS for prod)
 │   ├── services/
-│   │   ├── orchestrator.py         # Main pipeline (submit/approve/reject)
-│   │   └── risk.py                 # Deterministic rule-based risk engine
+│   │   ├── orchestrator.py         # Main pipeline: submit / approve / reject / auto_revoke
+│   │   ├── risk.py                 # Deterministic rule-based risk engine
+│   │   ├── drift.py                # Access drift scanner (actual vs HR policy)
+│   │   ├── expiry.py               # Background thread: auto-revoke expired grants
+│   │   ├── hr_policy.py            # Dept → required systems policy + access reasoning
+│   │   └── injection.py            # Prompt injection detection helpers
 │   ├── tools/
 │   │   ├── slack.py                # Mocked Slack adapter
 │   │   └── github.py               # Mocked GitHub adapter
@@ -228,91 +245,36 @@ ops-orchestrator/
 │       ├── auth.py                 # POST /auth/register|login
 │       ├── requests.py             # POST /requests, GET /requests, GET /requests/{id}
 │       ├── approvals.py            # GET /approvals/pending, POST /approvals/{id}/approve|reject
+│       ├── hr_events.py            # POST /hr/events (new_hire, role_change, termination)
+│       ├── drift.py                # GET /drift/scan
 │       └── demo.py                 # POST /demo/onboard
-├── web/                            # Next.js 15 + Tailwind frontend
-│   ├── src/
-│   │   ├── lib/
-│   │   │   ├── api.ts              # Typed API client (auto-attaches Bearer token)
-│   │   │   └── Layout.tsx          # Shared nav, route guard, Badge/Spinner components
-│   │   └── app/
-│   │       ├── login/page.tsx      # Login form + seeded account helper
-│   │       ├── page.tsx            # Dashboard: submit form + recent requests table
-│   │       ├── approvals/page.tsx  # Pending approvals list + approve/reject modal
-│   │       └── requests/[request_id]/page.tsx  # Request detail with live polling
-│   └── .env.local.example
+├── web/                            # Next.js 15 App Router + Tailwind CSS
+│   └── src/
+│       ├── lib/
+│       │   ├── api.ts              # Typed API client (auto-attaches Bearer token, 401 redirect)
+│       │   └── Layout.tsx          # Shared nav, route guard, Badge/Spinner components
+│       └── app/
+│           ├── login/              # Login form
+│           ├── page.tsx            # Admin: system dashboard | Requester: submit form
+│           ├── my-requests/        # Requester's request history with live polling
+│           ├── approvals/          # Pending queue + History tab (approver/admin)
+│           ├── hr/                 # HR event submission + Event History with slide-out panel
+│           ├── drift/              # Drift scan results (unexpected / missing / stale)
+│           └── requests/[request_id]/  # Request detail: timeline, plan, audit log
 └── tests/
     ├── conftest.py                 # TestClient + JWT fixtures
-    ├── test_auth.py                # Auth endpoint tests
-    ├── test_idempotency.py         # Duplicate key rejection tests
-    └── test_approval.py            # Approval gating + RBAC enforcement tests
+    ├── test_auth.py
+    ├── test_idempotency.py
+    └── test_approval.py
 ```
 
 ---
 
-## Audit Log
-
-Every state transition writes a row to `audit_logs`:
-
-| Field          | Description                              |
-|----------------|------------------------------------------|
-| correlation_id | Ties all events for one request together |
-| actor          | User or "system"                         |
-| action         | REQUEST_SUBMITTED, PLAN_GENERATED, etc.  |
-| input_hash     | SHA-256 of the original request payload  |
-| decision       | PLANNING / COMPLETED / AWAITING_APPROVAL |
-| created_at     | When the log entry was written           |
-| executed_at    | When the action actually ran             |
-
----
-
-## Swap to Production
-
-| Concern        | MVP                    | Production swap                        |
-|----------------|------------------------|----------------------------------------|
-| Database       | SQLite                 | Set `DATABASE_URL` to Postgres DSN     |
-| Queue          | In-memory dict         | Redis Streams / SQS / Celery           |
-| Auth           | X-User-Role header     | JWT + OAuth2 middleware                |
-| Tools          | Mocked adapters        | Real Slack/GitHub API clients          |
-| LLM            | claude-haiku (or stub) | claude-sonnet-4-6 with structured output |
-
----
-
-## Auth
-
-JWT-based authentication (HS256, 1-hour expiry). Every protected endpoint requires `Authorization: Bearer <token>`.
-
-### Login
-```bash
-curl -s -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "alice@acme-fintech.com", "password": "password123"}' | jq .
-```
-
-Copy `access_token` from the response, then pass it on every subsequent call:
+## Run Tests
 
 ```bash
-export TOKEN="<paste token here>"
-
-curl -s http://localhost:8000/requests \
-  -H "Authorization: Bearer $TOKEN" | jq .
+pytest tests/ -v
 ```
-
-### Register (new user)
-```bash
-curl -s -X POST http://localhost:8000/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email": "newuser@acme-fintech.com", "password": "password123", "role": "requester"}' | jq .
-```
-
-### Default seed accounts (dev only — created automatically on first startup)
-
-| Email | Role | Password |
-|---|---|---|
-| alice@acme-fintech.com | requester | password123 |
-| compliance@acme-fintech.com | approver | password123 |
-| admin@acme-fintech.com | admin | password123 |
-
-> Seed accounts use a hardcoded password for local development only. In production, change passwords immediately or disable seeding by setting real users before first boot.
 
 ---
 
@@ -321,64 +283,38 @@ curl -s -X POST http://localhost:8000/auth/register \
 ### Railway (recommended)
 
 1. Push repo to GitHub
-2. Create a new Railway project → **Deploy from GitHub repo**
+2. New Railway project → **Deploy from GitHub repo**
 3. Add a **Postgres** plugin — `DATABASE_URL` is injected automatically
-4. Set the remaining environment variables under **Variables**:
+4. Set environment variables:
 
 | Variable | Required | Notes |
 |---|---|---|
 | `DATABASE_URL` | Yes | Auto-set by Railway Postgres plugin |
-| `JWT_SECRET` | Yes | Random 32+ char string — `python -c "import secrets; print(secrets.token_hex(32))"` |
-| `ANTHROPIC_API_KEY` | No | Falls back to deterministic stub planner if unset |
+| `JWT_SECRET` | Yes | `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `ANTHROPIC_API_KEY` | No | Falls back to stub planner if unset |
 | `ENV` | No | Set to `production` |
 
-5. Set the **start command**:
-```
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
-```
+5. Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 
-### Render
-
-Same steps — add a Postgres database service, copy the internal DSN to `DATABASE_URL`, set `JWT_SECRET`, and use the start command above.
-
-### Frontend (Vercel / Netlify / Railway static)
+### Frontend (Vercel / Netlify)
 
 ```bash
-cd web
-npm run build   # output: .next/
+cd web && npm run build
 ```
 
-Set `NEXT_PUBLIC_API_BASE_URL` to your deployed backend URL (e.g. `https://ops-orchestrator.up.railway.app`). No other env vars required for the frontend.
+Set `NEXT_PUBLIC_API_BASE_URL` to your deployed backend URL. No other frontend env vars required.
 
 ---
 
-## What Breaks First at Scale
+## Known Limitations (MVP → Production)
 
-### 1. Prompt Injection
-**Risk:** A malicious requester crafts an `intent` or `payload` that hijacks the LLM planner into emitting steps for arbitrary destructive actions (e.g. `grant_prod_trading_access`, `exfiltrate_pii`).
-
-**Mitigation (implemented):** Every generated step passes through `app/tools/catalog.py` before execution. `_tool_dispatch` rejects any `(tool, action)` pair not in `TOOL_CATALOG` — the injected step is blocked at the tool layer regardless of what the LLM emits. Adding a new capability requires an explicit code change to the allowlist.
-
----
-
-### 2. Policy Drift
-**Risk:** Risk rules or the LLM prompt change silently over time. An audit log from six months ago says "LOW risk — auto-executed", but the current rule-set would classify the same step as HUMAN_ONLY. Incident replay and compliance reviews become unreliable.
-
-**Mitigation (implemented):** `POLICY_VERSION` (in `app/services/risk.py`) and `PROMPT_VERSION` (in `app/services/orchestrator.py`) are stamped on every `ops_requests` row and on every `PLAN_GENERATED` audit log entry. A compliance query can filter by version to compare decisions across rule-set generations. Bumping either constant is the mandatory first step before merging policy changes.
-
----
-
-### 3. Partial Tool Failures
-**Risk:** A multi-step plan partially executes — step 1 (add analyst to risk-models repo) succeeds, step 2 (send onboarding message) fails. The user is left in an inconsistent intermediate state, and the audit log shows COMPLETED.
-
-**Mitigation (partially implemented):** `execution_results` records per-step `ok`, `data`, and `error` fields. Every `AUTO_EXECUTED` and `APPROVED_EXECUTION_COMPLETE` audit entry carries `results_count`. At scale, add a compensating-action catalog that maps each action to its rollback action; if any step returns `ok: false`, trigger rollback steps before marking FAILED.
-
----
-
-### 4. Automation Bias
-**Risk:** Approvers rubber-stamp HUMAN_ONLY requests without meaningful review because the UI makes approval a single click. The human gate becomes theatre.
-
-**Mitigation (implemented):** `approve_request` requires `decision_reason` ≥ 20 characters for any request with `overall_risk = HUMAN_ONLY`. This is enforced server-side — no role (including admin) can bypass it. The reason is stored on `ApprovalRecord.reason` and included in the `REQUEST_APPROVED` audit log metadata, creating a written paper trail for each high-stakes decision.
+| Concern | MVP | Production swap |
+|---|---|---|
+| Database | SQLite | Set `DATABASE_URL` to Postgres DSN |
+| Approval queue | In-memory (lost on restart) | Redis Streams / SQS / Celery |
+| HR policy | Hardcoded JSON in `hr_policy.py` | External config service or DB table |
+| Tool adapters | Mocked Slack / GitHub | Real API clients |
+| LLM model | claude-haiku (or stub) | claude-sonnet-4-6 with structured output |
 
 ---
 

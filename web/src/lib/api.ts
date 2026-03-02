@@ -30,7 +30,8 @@ async function request<T>(
     let detail = res.statusText;
     try {
       const body = await res.json();
-      detail = body.detail ?? body.error ?? detail;
+      const raw = body.detail ?? body.error ?? detail;
+      detail = typeof raw === "string" ? raw : JSON.stringify(raw);
     } catch {
       /* ignore */
     }
@@ -104,6 +105,13 @@ export interface TaskPlan {
   prompt_version?: string;
 }
 
+export interface ApprovalInfo {
+  approver_id: string | null;
+  decision: string | null;
+  reason: string | null;
+  decided_at: string | null;
+}
+
 export interface OpsRequest {
   id: string;
   correlation_id: string;
@@ -124,6 +132,7 @@ export interface OpsRequest {
   expires_at?: string | null;
   auto_revoked?: boolean;
   revoke_request_id?: string | null;
+  approval?: ApprovalInfo | null;
   created_at: string;
   updated_at: string;
 }

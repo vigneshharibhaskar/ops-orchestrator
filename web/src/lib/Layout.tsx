@@ -40,10 +40,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const navLink = (href: string, label: string) => (
     <Link
       href={href}
-      className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+      className={`px-3 py-1.5 text-sm font-medium transition-colors ${
         pathname === href || pathname.startsWith(href + "/")
-          ? "bg-indigo-700 text-white"
-          : "text-indigo-100 hover:bg-indigo-700"
+          ? "text-gray-900 font-semibold"
+          : "text-gray-500 hover:text-gray-900"
       }`}
     >
       {label}
@@ -57,17 +57,21 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <nav className="bg-indigo-800 shadow-sm">
+      <nav className="bg-white border-b border-[#e8e8e4]">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-4">
-          <span className="text-white font-semibold mr-4">Ops Orchestrator</span>
-          {isRequester ? navLink("/", "Request Access") : navLink("/", "Dashboard")}
+          <span className="text-gray-900 font-semibold font-sora mr-4">Ops Orchestrator</span>
+          {isRequester
+            ? navLink("/", "Request Access")
+            : isAdmin
+            ? navLink("/", "Dashboard")
+            : null}
           {isRequester && navLink("/my-requests", "My Requests")}
           {canApprove && navLink("/approvals", "Approvals")}
           {(isAdmin || isHR) && navLink("/hr", "HR Events")}
           {canApprove && navLink("/drift", "Drift")}
           <button
             onClick={logout}
-            className="ml-auto text-indigo-200 hover:text-white text-sm transition-colors"
+            className="ml-auto text-gray-500 hover:text-gray-900 text-sm transition-colors"
           >
             Logout
           </button>
@@ -133,7 +137,7 @@ export function ErrorMsg({ msg }: { msg: string }) {
 export function Spinner() {
   return (
     <div className="flex items-center justify-center py-16">
-      <div className="h-8 w-8 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin" />
+      <div className="h-8 w-8 rounded-full border-4 border-gray-200 border-t-gray-800 animate-spin" />
     </div>
   );
 }
