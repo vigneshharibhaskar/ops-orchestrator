@@ -13,6 +13,7 @@ class Role(str, Enum):
     REQUESTER = "requester"
     APPROVER = "approver"
     ADMIN = "admin"
+    HR = "hr"
 
 
 class RiskLevel(str, Enum):
@@ -43,6 +44,15 @@ class OpsRequestCreate(BaseModel):
     role: Role = Role.REQUESTER
     intent: str = Field(..., min_length=1, max_length=255)
     payload: Dict[str, Any] = Field(default_factory=dict)
+    justification: Optional[str] = None
+    expires_at: Optional[datetime] = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def expires_at_must_be_future(cls, v: Optional[datetime]) -> Optional[datetime]:
+        if v is not None and v <= datetime.utcnow():
+            raise ValueError("expires_at must be a future date")
+        return v
 
 
 # ── Explainability schemas ────────────────────────────────────────────────────
@@ -114,6 +124,9 @@ class OpsRequestResponse(BaseModel):
     error_message: Optional[str] = None
     policy_version: Optional[str] = None
     prompt_version: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    auto_revoked: bool = False
+    revoke_request_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

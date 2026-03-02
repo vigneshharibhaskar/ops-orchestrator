@@ -6,11 +6,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.db import init_db
+from app.services.expiry import start_expiry_checker
 from app.routers import requests as requests_router
 from app.routers import approvals as approvals_router
 from app.routers import demo as demo_router
 from app.routers import auth as auth_router
 from app.routers import hr_events as hr_events_router
+from app.routers import drift as drift_router
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -28,6 +30,7 @@ def _seed_users() -> None:
         ("alice@acme-fintech.com", "password123", "requester"),
         ("compliance@acme-fintech.com", "password123", "approver"),
         ("admin@acme-fintech.com", "password123", "admin"),
+        ("hr@acme-fintech.com", "password123", "hr"),
     ]
 
     db = SessionLocal()
@@ -43,10 +46,12 @@ def _seed_users() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize DB tables and seed dev users on startup."""
+    """Initialize DB tables, seed dev users, and start background services."""
     init_db()
     _seed_users()
+    stop_expiry = start_expiry_checker()
     yield
+    stop_expiry.set()
 
 
 app = FastAPI(
@@ -79,6 +84,7 @@ app.include_router(requests_router.router)
 app.include_router(approvals_router.router)
 app.include_router(demo_router.router)
 app.include_router(hr_events_router.router)
+app.include_router(drift_router.router)
 
 
 # ── Middleware: inject X-Correlation-ID on every response ─────────────────────

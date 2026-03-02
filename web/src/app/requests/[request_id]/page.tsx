@@ -470,7 +470,7 @@ export default function RequestDetailPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-gray-400 mt-1 mb-4 flex-wrap">
+          <div className="flex items-center gap-2 text-xs text-gray-400 mt-1 mb-3 flex-wrap">
             <span className="font-mono text-gray-400">{req.id.slice(0, 6)}…</span>
             <button
               onClick={copyId}
@@ -487,6 +487,30 @@ export default function RequestDetailPage() {
               </>
             )}
           </div>
+
+          {req.expires_at && (
+            <div className="flex items-center gap-2 text-xs mb-4 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 font-medium">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-400 inline-block" />
+                Expires {fmt(req.expires_at)}
+              </span>
+              {req.auto_revoked && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-50 text-red-700 font-medium">
+                  <span className="h-1.5 w-1.5 rounded-full bg-red-500 inline-block" />
+                  Auto-revoked
+                  {req.revoke_request_id && (
+                    <a
+                      href={`/requests/${req.revoke_request_id}`}
+                      className="ml-1 underline hover:text-red-900"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      View →
+                    </a>
+                  )}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Progress bar */}
           <div className="flex items-center gap-3">

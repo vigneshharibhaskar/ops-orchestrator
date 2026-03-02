@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, JSON, Float, Text, ForeignKey, Enum
+from sqlalchemy import Boolean, Column, String, DateTime, JSON, Float, Text, ForeignKey, Enum
 from sqlalchemy.orm import relationship
 import enum
 
@@ -59,6 +59,9 @@ class OpsRequest(Base):
     policy_version = Column(String, nullable=True)
     prompt_version = Column(String, nullable=True)
     error_message = Column(Text, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    auto_revoked = Column(Boolean, default=False)
+    revoke_request_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

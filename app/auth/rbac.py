@@ -17,6 +17,7 @@ class Role(str, Enum):
     REQUESTER = "requester"
     APPROVER = "approver"
     ADMIN = "admin"
+    HR = "hr"
 
 
 class UserContext(BaseModel):

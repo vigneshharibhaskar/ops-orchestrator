@@ -4,12 +4,59 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "@/lib/api";
 
+const ROLES = [
+  {
+    key: "hr",
+    label: "HR Coordinator",
+    description: "Submit lifecycle events — onboarding, offboarding, role changes",
+    badge: "HR",
+    badgeCls: "bg-violet-500/20 text-violet-300 border border-violet-500/30",
+    icon: "👩‍💼",
+    email: "hr@acme-fintech.com",
+  },
+  {
+    key: "requester",
+    label: "Employee",
+    description: "Request individual access, timed grants",
+    badge: "REQUESTER",
+    badgeCls: "bg-blue-500/20 text-blue-300 border border-blue-500/30",
+    icon: "👩‍💻",
+    email: "alice@acme-fintech.com",
+  },
+  {
+    key: "approver",
+    label: "Compliance Approver",
+    description: "Review AI-flagged requests, approve or reject",
+    badge: "APPROVER",
+    badgeCls: "bg-amber-500/20 text-amber-300 border border-amber-500/30",
+    icon: "🔍",
+    email: "compliance@acme-fintech.com",
+  },
+  {
+    key: "admin",
+    label: "Admin",
+    description: "Full access — HR events, audit logs, drift",
+    badge: "ADMIN",
+    badgeCls: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30",
+    icon: "⚙️",
+    email: "admin@acme-fintech.com",
+  },
+];
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [selectedRole, setSelectedRole] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  function selectRole(roleKey: string, roleEmail: string) {
+    setSelectedRole(roleKey);
+    setEmail(roleEmail);
+    setPassword("password123");
+    setError("");
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -20,7 +67,13 @@ export default function LoginPage() {
       localStorage.setItem("token", res.access_token);
       localStorage.setItem("role", res.role);
       localStorage.setItem("email", email);
-      router.replace("/");
+      const ROLE_REDIRECT: Record<string, string> = {
+        hr: "/hr",
+        approver: "/approvals",
+        requester: "/",
+        admin: "/",
+      };
+      router.replace(ROLE_REDIRECT[res.role] ?? "/");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -29,20 +82,90 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">Ops Orchestrator</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Internal access &amp; workflow automation
+    <div className="flex min-h-screen flex-col lg:flex-row">
+      {/* ── Left panel ──────────────────────────────────────────────────── */}
+      <div className="lg:w-[55%] bg-[#0d0d0d] flex flex-col p-8 lg:p-12">
+        {/* Logo */}
+        <div className="flex items-center gap-3 mb-12">
+          <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-500 text-lg select-none">
+            ⚡
+          </span>
+          <span className="text-white text-sm font-semibold tracking-wide">
+            Ops Orchestrator
+          </span>
+        </div>
+
+        {/* Hero */}
+        <div className="mb-10">
+          <div className="flex items-center gap-2 mb-4">
+            <span className="inline-block w-5 h-px bg-emerald-400" />
+            <span className="text-xs text-emerald-400 uppercase tracking-widest font-medium">
+              Access Intelligence
+            </span>
+          </div>
+          <h1 className="text-4xl lg:text-5xl font-black text-white leading-tight mb-2">
+            AI-native ops.
+          </h1>
+          <h1 className="text-4xl lg:text-5xl font-black text-emerald-400 leading-tight mb-6">
+            Human in control.
+          </h1>
+          <p className="text-sm text-zinc-400 max-w-sm leading-relaxed">
+            Automates access provisioning across the full employee lifecycle —
+            with drift detection, timed grants, and a hard human gate on every
+            sensitive decision.
           </p>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-          <h2 className="text-lg font-semibold mb-6">Sign in</h2>
+        {/* Role cards */}
+        <div className="flex-1">
+          <p className="text-xs text-zinc-500 uppercase tracking-widest mb-3 font-medium">
+            Choose your role
+          </p>
+          <div className="space-y-2">
+            {ROLES.map((r) => (
+              <button
+                key={r.key}
+                type="button"
+                onClick={() => selectRole(r.key, r.email)}
+                className={`w-full flex items-center gap-3 rounded-xl p-4 text-left transition-all ${
+                  selectedRole === r.key
+                    ? "bg-zinc-800 ring-1 ring-emerald-500/50"
+                    : "bg-zinc-900 hover:bg-zinc-800"
+                }`}
+              >
+                <span className="text-2xl flex-shrink-0 select-none">{r.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-white">{r.label}</div>
+                  <div className="text-xs text-zinc-500 truncate mt-0.5">
+                    {r.description}
+                  </div>
+                </div>
+                <span
+                  className={`flex-shrink-0 text-xs font-semibold px-2 py-0.5 rounded ${r.badgeCls}`}
+                >
+                  {r.badge}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <p className="mt-8 text-xs text-zinc-600">
+          Acme Fintech · Internal tooling · v1.1.0
+        </p>
+      </div>
+
+      {/* ── Right panel ─────────────────────────────────────────────────── */}
+      <div className="lg:w-[45%] bg-white flex flex-col justify-center px-10 lg:px-16 py-12">
+        <div className="max-w-sm w-full mx-auto">
+          <h2 className="text-3xl font-bold text-gray-900">Welcome back</h2>
+          <p className="text-sm text-gray-500 mt-1 mb-8">
+            Sign in to your workspace
+          </p>
 
           {error && (
-            <div className="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+            <div className="mb-5 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
               {error}
             </div>
           )}
@@ -57,8 +180,8 @@ export default function LoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 placeholder="you@acme-fintech.com"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
               />
             </div>
             <div>
@@ -70,57 +193,20 @@ export default function LoginPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
               />
             </div>
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded-lg bg-indigo-600 text-white py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              className="w-full rounded-lg bg-gray-900 text-white py-3 text-sm font-semibold hover:bg-black disabled:opacity-50 transition-colors mt-2"
             >
-              {loading ? "Signing in…" : "Sign in"}
+              {loading ? "Signing in…" : "Sign in →"}
             </button>
           </form>
-        </div>
 
-        <div className="mt-6 bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-            Seeded demo accounts
-          </p>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gray-500 text-xs border-b border-gray-100">
-                <th className="pb-2">Email</th>
-                <th className="pb-2">Role</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {[
-                ["alice@acme-fintech.com", "requester"],
-                ["compliance@acme-fintech.com", "approver"],
-                ["admin@acme-fintech.com", "admin"],
-              ].map(([e, r]) => (
-                <tr
-                  key={e}
-                  className="cursor-pointer hover:bg-indigo-50 transition-colors"
-                  onClick={() => {
-                    setEmail(e);
-                    setPassword("password123");
-                  }}
-                >
-                  <td className="py-2 font-mono text-xs text-gray-700">{e}</td>
-                  <td className="py-2">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700">
-                      {r}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="text-xs text-gray-400 mt-3">
-            Password: <span className="font-mono">password123</span> — click a
-            row to autofill
+          <p className="text-xs text-gray-400 text-center mt-6">
+            Select a role on the left to auto-fill
           </p>
         </div>
       </div>

@@ -67,7 +67,7 @@ def _employee_label(event) -> str:
 def ingest_hr_event(
     body: HREventRequest,
     db: Session = Depends(get_db),
-    user: UserContext = Depends(require_role(Role.ADMIN)),
+    user: UserContext = Depends(require_role(Role.ADMIN, Role.HR)),
 ):
     """Validate an HR lifecycle event, derive access actions via policy engine,
     and fan out one OpsRequest per action through the standard orchestrator pipeline.

@@ -51,11 +51,11 @@ def _serialize(req: OpsRequest) -> OpsRequestResponse:
 def list_requests(
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    user: UserContext = Depends(require_role(Role.REQUESTER, Role.APPROVER, Role.ADMIN)),
+    user: UserContext = Depends(require_role(Role.REQUESTER, Role.APPROVER, Role.ADMIN, Role.HR)),
 ):
-    """List requests. Requesters see only their own; admins/approvers see all."""
+    """List requests. Requesters and HR see only their own; admins/approvers see all."""
     query = db.query(OpsRequest)
-    if user.role == Role.REQUESTER:
+    if user.role in (Role.REQUESTER, Role.HR):
         query = query.filter(OpsRequest.requester_id == user.user_id)
     results = query.order_by(OpsRequest.created_at.desc()).limit(limit).all()
     return [_serialize(r) for r in results]
@@ -71,7 +71,7 @@ def submit_request(
     body: OpsRequestCreate,
     response: Response,
     db: Session = Depends(get_db),
-    user: UserContext = Depends(require_role(Role.REQUESTER, Role.ADMIN)),
+    user: UserContext = Depends(require_role(Role.REQUESTER, Role.ADMIN, Role.HR)),
 ):
     """Submit a new ops request. Returns 409 if idempotency_key already used."""
     # Identity comes from the JWT — ignore whatever the body claims.
@@ -99,7 +99,7 @@ def submit_request(
 def get_request(
     request_id: str,
     db: Session = Depends(get_db),
-    user: UserContext = Depends(require_role(Role.REQUESTER, Role.APPROVER, Role.ADMIN)),
+    user: UserContext = Depends(require_role(Role.REQUESTER, Role.APPROVER, Role.ADMIN, Role.HR)),
 ):
     """Fetch a request by ID."""
     req = db.query(OpsRequest).filter_by(id=request_id).first()
@@ -117,7 +117,7 @@ def answer_clarifications(
     request_id: str,
     body: ClarificationSubmit,
     db: Session = Depends(get_db),
-    user: UserContext = Depends(require_role(Role.REQUESTER, Role.ADMIN)),
+    user: UserContext = Depends(require_role(Role.REQUESTER, Role.ADMIN, Role.HR)),
 ):
     """Submit answers to clarification questions and resume the pipeline."""
     req = orchestrator.submit_clarification(db, request_id, body.answers)

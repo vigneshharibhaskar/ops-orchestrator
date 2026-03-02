@@ -52,15 +52,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const canApprove = role === "approver" || role === "admin";
   const isAdmin = role === "admin";
+  const isHR = role === "hr";
+  const isRequester = role === "requester";
 
   return (
     <div className="min-h-screen flex flex-col">
       <nav className="bg-indigo-800 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-4">
           <span className="text-white font-semibold mr-4">Ops Orchestrator</span>
-          {navLink("/", "Dashboard")}
+          {isRequester ? navLink("/", "Request Access") : navLink("/", "Dashboard")}
+          {isRequester && navLink("/my-requests", "My Requests")}
           {canApprove && navLink("/approvals", "Approvals")}
-          {isAdmin && navLink("/hr", "HR Events")}
+          {(isAdmin || isHR) && navLink("/hr", "HR Events")}
+          {canApprove && navLink("/drift", "Drift")}
           <button
             onClick={logout}
             className="ml-auto text-indigo-200 hover:text-white text-sm transition-colors"

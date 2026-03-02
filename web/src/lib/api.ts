@@ -121,6 +121,9 @@ export interface OpsRequest {
   error_message?: string;
   policy_version?: string;
   prompt_version?: string;
+  expires_at?: string | null;
+  auto_revoked?: boolean;
+  revoke_request_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -175,6 +178,8 @@ export const requests = {
     idempotency_key: string;
     intent: string;
     payload: Record<string, unknown>;
+    justification?: string;
+    expires_at?: string | null;
   }) =>
     request<OpsRequest>("/requests", {
       method: "POST",
@@ -234,6 +239,25 @@ export const hrEvents = {
       method: "POST",
       body: JSON.stringify({ event }),
     }),
+};
+
+// ── Drift ─────────────────────────────────────────────────────────────────────
+
+export interface DriftItem {
+  email: string;
+  system: string;
+  drift_type: "unexpected" | "missing" | "stale";
+  severity: "HIGH" | "MEDIUM" | "LOW";
+  detail: string;
+  last_grant_id?: string | null;
+  last_grant_date?: string | null;
+  days_since_grant?: number | null;
+  department?: string | null;
+}
+
+export const drift = {
+  scan: (email?: string) =>
+    request<DriftItem[]>(`/drift${email ? `?email=${encodeURIComponent(email)}` : ""}`),
 };
 
 // ── Health ────────────────────────────────────────────────────────────────────

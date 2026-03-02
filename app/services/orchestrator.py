@@ -85,7 +85,7 @@ def _tool_dispatch(tool: str, action: str, args: Dict[str, Any]) -> Dict[str, An
 
 # ── Claude plan generation ─────────────────────────────────────────────────────
 
-PROMPT_VERSION = "1.0.0"
+PROMPT_VERSION = "1.1.0"
 MODEL_NAME = "claude-haiku-4-5-20251001"
 
 
@@ -145,6 +145,7 @@ Rules:
 - Keep steps minimal and actionable
 - Set risk field to your best guess (the system will override with deterministic rules)
 - Flag policy concerns (e.g. granting org access, production changes) in policy_flags
+- If the payload contains an expires_at field, note in assumptions that access is time-bounded and will be auto-revoked at expiry
 - Return ONLY the JSON object, no markdown, no explanation
 """
 
@@ -366,6 +367,9 @@ def submit_request(
         raise DuplicateRequestError(existing.id)
 
     # ── Step 2: Persist request ────────────────────────────────────────────
+    if body.justification:
+        body.payload["justification"] = body.justification
+
     ops_request = OpsRequest(
         id=str(uuid.uuid4()),
         correlation_id=correlation_id,
@@ -375,6 +379,7 @@ def submit_request(
         payload=body.payload,
         input_hash=input_hash,
         status=RequestStatus.PLANNING,
+        expires_at=body.expires_at,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -826,4 +831,59 @@ def _fail_request(db: Session, obj: OpsRequest, error: str) -> None:
     obj.status = RequestStatus.FAILED
     obj.error_message = error
     obj.updated_at = datetime.utcnow()
+    db.commit()
+
+
+# ── Auto-revoke (time-bounded access expiry) ───────────────────────────────────
+
+# Maps grant actions to their revoke counterparts for auto-expiry
+_REVOKE_MAP: Dict[tuple, tuple] = {
+    ("vpn",              "grant_access"):   ("vpn",              "revoke_access"),
+    ("github",           "add_to_org"):     ("github",           "remove_from_org"),
+    ("github",           "add_collaborator"): ("github",         "remove_from_org"),
+    ("okta",             "provision_user"): ("okta",             "deactivate_user"),
+    ("google_workspace", "create_user"):    ("google_workspace", "suspend_user"),
+}
+
+
+def auto_revoke(db: Session, expired_req: OpsRequest) -> None:
+    """Directly execute revoke steps for an expired grant, bypassing planning/risk.
+
+    The human pre-authorized the time-bounded grant; expiry IS the approval.
+    Creates an OpsRequest audit record, then calls tool adapters directly.
+    """
+    revoke_results = []
+    for step_result in (expired_req.execution_results or []):
+        tool   = step_result.get("tool_name", "")
+        action = step_result.get("action_name", "")
+        data   = step_result.get("data", {})
+        pair   = _REVOKE_MAP.get((tool, action))
+        if not pair:
+            continue
+        revoke_tool, revoke_action = pair
+        email = expired_req.payload.get("user_email") or data.get("user_email", "")
+        args: Dict[str, Any] = {"email": email}
+        if "cert_id" in data:
+            args["cert_id"] = data["cert_id"]
+        if "org" in data:
+            args["org"] = data["org"]
+        revoke_results.append(_tool_dispatch(revoke_tool, revoke_action, args))
+
+    revoke_req = OpsRequest(
+        id=str(uuid.uuid4()),
+        correlation_id=str(uuid.uuid4()),
+        idempotency_key=f"auto-revoke-{expired_req.id}",
+        requester_id="system",
+        intent="auto_revoke_expired_access",
+        payload={"original_request_id": expired_req.id},
+        input_hash=hashlib.sha256(expired_req.id.encode()).hexdigest(),
+        status=RequestStatus.COMPLETED,
+        execution_results=revoke_results,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(revoke_req)
+    expired_req.auto_revoked = True
+    expired_req.revoke_request_id = revoke_req.id
+    expired_req.updated_at = datetime.utcnow()
     db.commit()
