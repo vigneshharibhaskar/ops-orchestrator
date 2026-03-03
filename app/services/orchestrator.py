@@ -205,6 +205,47 @@ def _stub_plan(
     clars = clarifications or {}
     intent_lower = intent.lower()
 
+    # System-specific provision/revoke — HR-originated requests always carry payload["system"].
+    # Check this first so "revoke_okta_access" doesn't fall into the generic offboard branch.
+    _SYSTEM_TOOL: Dict[str, Dict[str, tuple]] = {
+        # system → {"provision": (tool, action), "revoke": (tool, action)}
+        "github":           {"provision": ("github", "add_to_org"),            "revoke": ("github", "remove_from_org")},
+        "slack":            {"provision": ("slack",  "invite_to_channel"),     "revoke": ("slack",  "send_message")},
+        "okta":             {"provision": ("okta",   "provision_user"),        "revoke": ("okta",   "deactivate_user")},
+        "vpn":              {"provision": ("vpn",    "grant_access"),          "revoke": ("vpn",    "revoke_access")},
+        "google_workspace": {"provision": ("google_workspace", "create_user"), "revoke": ("google_workspace", "suspend_user")},
+        "netsuite":         {"provision": ("netsuite", "provision_user"),      "revoke": ("netsuite", "deactivate_user")},
+        "workday":          {"provision": ("workday",  "provision_user"),      "revoke": ("workday",  "deactivate_user")},
+    }
+
+    system = payload.get("system", "").lower()
+    hr_action = payload.get("action", "provision").lower()  # "provision" | "revoke"
+    if system and system in _SYSTEM_TOOL:
+        user_email = payload.get("user_email", "user@example.com")
+        username = user_email.split("@")[0]
+        tool, action = _SYSTEM_TOOL[system].get(hr_action, _SYSTEM_TOOL[system]["provision"])
+        risk = "HUMAN_ONLY" if hr_action == "revoke" else ("HIGH" if system in {"github", "vpn"} else "MEDIUM")
+        args: Dict[str, Any] = {"email": user_email}
+        if system == "github":
+            args = {"org": "acme-corp", "user": username}
+        elif system == "slack":
+            args = {"channel": "#general", "user_email": user_email} if hr_action == "provision" else {
+                "channel": "#general", "text": f"{username} account access revoked."
+            }
+        return {
+            "plan": [{
+                "step": 1,
+                "name": f"{hr_action.capitalize()} {system} access for {username}",
+                "tool": tool,
+                "action": action,
+                "args": args,
+                "risk": risk,
+                "requires_approval": risk in ("HIGH", "HUMAN_ONLY"),
+            }],
+            "assumptions": [f"Username derived from email: {username}"],
+            "policy_flags": [f"{hr_action.capitalize()} {system} access per HR policy"],
+        }
+
     if "onboard" in intent_lower:
         user_email = payload.get("user_email", "new_user@example.com")
         username = user_email.split("@")[0]
@@ -277,47 +318,6 @@ def _stub_plan(
             ],
             "assumptions": [],
             "policy_flags": ["Offboarding actions are HUMAN_ONLY per security policy"],
-        }
-
-    # System-specific provision/revoke — HR-originated requests always carry payload["system"]
-    # Map each system to the right tool and action pair.
-    _SYSTEM_TOOL: Dict[str, Dict[str, tuple]] = {
-        # system → {"provision": (tool, action), "revoke": (tool, action)}
-        "github":           {"provision": ("github", "add_to_org"),       "revoke": ("github", "remove_from_org")},
-        "slack":            {"provision": ("slack",  "invite_to_channel"), "revoke": ("slack",  "send_message")},
-        "okta":             {"provision": ("okta",   "provision_user"),    "revoke": ("okta",   "deactivate_user")},
-        "vpn":              {"provision": ("vpn",    "grant_access"),      "revoke": ("vpn",    "revoke_access")},
-        "google_workspace": {"provision": ("google_workspace", "create_user"), "revoke": ("google_workspace", "suspend_user")},
-        "netsuite":         {"provision": ("netsuite", "provision_user"),  "revoke": ("netsuite", "deactivate_user")},
-        "workday":          {"provision": ("workday",  "provision_user"),  "revoke": ("workday",  "deactivate_user")},
-    }
-
-    system = payload.get("system", "").lower()
-    hr_action = payload.get("action", "provision").lower()  # "provision" | "revoke"
-    if system and system in _SYSTEM_TOOL:
-        user_email = payload.get("user_email", "user@example.com")
-        username = user_email.split("@")[0]
-        tool, action = _SYSTEM_TOOL[system].get(hr_action, _SYSTEM_TOOL[system]["provision"])
-        risk = "HUMAN_ONLY" if hr_action == "revoke" else ("HIGH" if system in {"github", "vpn"} else "MEDIUM")
-        args: Dict[str, Any] = {"email": user_email}
-        if system == "github":
-            args = {"org": "acme-corp", "user": username} if hr_action == "provision" else {"org": "acme-corp", "user": username}
-        elif system == "slack":
-            args = {"channel": "#general", "user_email": user_email} if hr_action == "provision" else {
-                "channel": "#general", "text": f"{username} account access revoked."
-            }
-        return {
-            "plan": [{
-                "step": 1,
-                "name": f"{hr_action.capitalize()} {system} access for {username}",
-                "tool": tool,
-                "action": action,
-                "args": args,
-                "risk": risk,
-                "requires_approval": risk in ("HIGH", "HUMAN_ONLY"),
-            }],
-            "assumptions": [f"Username derived from email: {username}"],
-            "policy_flags": [f"{hr_action.capitalize()} {system} access per HR policy"],
         }
 
     # Generic access grant — may need clarification if required fields are absent
