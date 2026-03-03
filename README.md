@@ -20,6 +20,51 @@ POST /requests
                           POST /approvals/{id}/approve
                               └─ execute all steps → COMPLETED
 ```
+flowchart LR
+  %% ===== Actors =====
+  subgraph Actors["Actors (outside system)"]
+    UI["Next.js UI\n(Employee / HR / Approver / Admin)"]
+    GH["GitHub API\n(mock/real)"]
+    SL["Slack API\n(mock/real)"]
+  end
+
+  %% ===== System Boundary =====
+  subgraph OO["Ops Orchestrator (System Boundary)"]
+    API["FastAPI API Layer\n/auth /requests /approvals /hr /drift\nJWT RBAC + Idempotency"]
+
+    subgraph LLM["LLM Planning Boundary"]
+      CLAUDE["Claude (haiku/sonnet)\n→ TaskPlan JSON\n[PROMPT_VERSION stamped]"]
+    end
+
+    subgraph RISK["Deterministic Risk Engine Boundary"]
+      POLICY["Rule-based Risk Engine\n→ LOW / MEDIUM / HIGH / HUMAN_ONLY\n[POLICY_VERSION stamped]"]
+    end
+
+    subgraph GOV["Governance & Routing"]
+      AUTO["Auto-execute\n(LOW/MEDIUM)"]
+      QUEUE["Approval Queue\n(HIGH/HUMAN_ONLY)"]
+      APPROVE["Approve / Reject\nreason ≥ 20 chars\n(server enforced)"]
+    end
+
+    subgraph SANDBOX["Tool Execution Sandbox (Allowlist)"]
+      DISPATCH["tool_dispatch\nTOOL_CATALOG allowlist\nBlocks unknown tool/action pairs"]
+      TOOLS["Tool Adapters\nGitHub / Slack / Others"]
+    end
+
+    DATA["DB: ops_requests + approvals + audit_logs\ncorrelation_id + input_hash\nversion stamps + decisions"]
+    BG["Background Jobs\nExpiry auto-revoke + Drift scan"]
+  end
+
+  %% ===== Flow =====
+  UI --> API --> CLAUDE --> POLICY
+  POLICY -->|LOW/MEDIUM| AUTO --> DISPATCH --> TOOLS --> DATA
+  POLICY -->|HIGH/HUMAN_ONLY| QUEUE --> APPROVE --> DISPATCH --> TOOLS --> DATA
+  API --> DATA
+  BG --> DATA
+  TOOLS --> GH
+  TOOLS --> SL
+
+
 
 **RBAC roles** (enforced via JWT claims, not headers):
 
