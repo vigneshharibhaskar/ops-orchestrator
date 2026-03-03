@@ -338,7 +338,7 @@ pytest tests/ -v
 
 ---
 
-### 4. Partial Tool Failures
+### 3. Partial Tool Failures
 
 **Risk:** A multi-step plan partially executes — step 1 succeeds, step 2 fails. The user is left in an inconsistent state and the audit log shows COMPLETED.
 
