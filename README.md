@@ -26,7 +26,7 @@ POST /requests
 |------------|:--------------:|:----------------:|:---------:|:---------------:|
 | requester  | ✅ | ❌ | ❌ | ❌ |
 | approver   | ❌ | ✅ | ❌ | ❌ |
-| hr         | ❌ | ❌ | ✅ | ❌ |
+| hr         | ✅ | ❌ | ✅ | ❌ |
 | admin      | ✅ | ✅ | ✅ | ✅ |
 
 ---
@@ -34,10 +34,10 @@ POST /requests
 ## Features
 
 ### Request Pipeline
-Submit an ops request in plain language. Claude generates a structured execution plan; the risk engine classifies each step. Low and medium risk requests execute automatically. High risk and human-only requests enter a human approval queue with mandatory written justification (≥ 20 characters, enforced server-side).
+Submit an ops request in plain language. Claude generates a structured execution plan; the risk engine classifies each step. Low and medium risk requests execute automatically. High risk and human-only requests enter a human approval queue; HUMAN_ONLY approvals require a written justification of at least 20 characters, enforced server-side.
 
 ### Approvals
-Approvers see a live pending queue with full request context — intent, AI plan, risk classification, and clarification history. Each approve/reject action requires a written reason that is stored in the audit trail. A History tab shows all decided requests with outcome and approver.
+Approvers see a live pending queue with full request context — intent, AI plan, risk classification, and clarification history. A written reason is stored in the audit trail for every decision; HUMAN_ONLY approvals additionally enforce a minimum 20-character justification server-side. A History tab shows all decided requests with outcome and approver.
 
 ### HR Events
 HR submits lifecycle events (new hire, role change, termination) through a structured form. The policy engine derives the correct access actions for each event and the employee's department, then queues them through the standard request pipeline. An Event History tab shows all submitted events grouped by employee, with a slide-out panel showing per-system status and approval outcomes.
@@ -51,7 +51,7 @@ Compares actual provisioning records against HR department policy to surface thr
 | Missing | Policy requires access but no grant record exists | MEDIUM |
 | Stale | Access was legitimately granted but is over 90 days old | LOW |
 
-Results include one-click Revoke (unexpected) and Grant (missing) actions.
+Results include Revoke (unexpected) and Grant (missing) action buttons — currently UI placeholders, not yet wired to backend endpoints.
 
 ### Admin Dashboard
 Admins land on a live system overview — pending approval count, drift findings, auto-revocations in the last 24 hours, and total requests today — with alert banners for aging queues and open drift findings.
@@ -163,7 +163,7 @@ curl -s -X POST http://localhost:8000/hr/events \
 
 ### Scan for access drift
 ```bash
-curl -s "http://localhost:8000/drift/scan" \
+curl -s "http://localhost:8000/drift" \
   -H "Authorization: Bearer $TOKEN" | jq .
 ```
 
@@ -237,7 +237,13 @@ ops-orchestrator/
 │   │   └── injection.py            # Prompt injection detection helpers
 │   ├── tools/
 │   │   ├── slack.py                # Mocked Slack adapter
-│   │   └── github.py               # Mocked GitHub adapter
+│   │   ├── github.py               # Mocked GitHub adapter
+│   │   ├── okta.py                 # Mocked Okta adapter
+│   │   ├── google_workspace.py     # Mocked Google Workspace adapter
+│   │   ├── vpn.py                  # Mocked VPN adapter
+│   │   ├── netsuite.py             # Mocked NetSuite adapter
+│   │   ├── workday.py              # Mocked Workday adapter
+│   │   └── catalog.py              # TOOL_CATALOG allowlist + _tool_dispatch
 │   ├── observability/
 │   │   └── logger.py               # Structured JSON logger + DB audit writer
 │   └── routers/
@@ -245,7 +251,7 @@ ops-orchestrator/
 │       ├── requests.py             # POST /requests, GET /requests, GET /requests/{id}
 │       ├── approvals.py            # GET /approvals/pending, POST /approvals/{id}/approve|reject
 │       ├── hr_events.py            # POST /hr/events (new_hire, role_change, termination)
-│       ├── drift.py                # GET /drift/scan
+│       ├── drift.py                # GET /drift?email=
 │       └── demo.py                 # POST /demo/onboard
 ├── web/                            # Next.js 15 App Router + Tailwind CSS
 │   └── src/
@@ -312,7 +318,7 @@ Set `NEXT_PUBLIC_API_BASE_URL` to your deployed backend URL. No other frontend e
 | Database | SQLite | Set `DATABASE_URL` to Postgres DSN |
 | Approval queue | In-memory (lost on restart) | Redis Streams / SQS / Celery |
 | HR policy | Hardcoded JSON in `hr_policy.py` | External config service or DB table |
-| Tool adapters | Mocked Slack / GitHub | Real API clients |
+| Tool adapters | Mocked Slack, GitHub, Okta, Google Workspace, VPN, NetSuite, Workday | Real API clients |
 | LLM model | claude-haiku (or stub) | claude-sonnet-4-6 with structured output |
 
 ---

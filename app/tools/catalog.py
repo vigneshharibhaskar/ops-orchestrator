@@ -22,11 +22,9 @@ TOOL_CATALOG: Dict[str, FrozenSet[str]] = {
     }),
     "github": frozenset({
         "add_to_org",
+        "add_collaborator",
         "remove_from_org",
         "create_pr",
-        "add_collaborator",
-        "create_repo",
-        "create_branch",
     }),
     "okta": frozenset({
         "provision_user",
@@ -39,6 +37,14 @@ TOOL_CATALOG: Dict[str, FrozenSet[str]] = {
     "vpn": frozenset({
         "grant_access",
         "revoke_access",
+    }),
+    "netsuite": frozenset({
+        "provision_user",
+        "deactivate_user",
+    }),
+    "workday": frozenset({
+        "provision_user",
+        "deactivate_user",
     }),
 }
 

@@ -35,6 +35,8 @@ from app.tools import github as github_adapter
 from app.tools import okta as okta_adapter
 from app.tools import google_workspace as google_workspace_adapter
 from app.tools import vpn as vpn_adapter
+from app.tools import netsuite as netsuite_adapter
+from app.tools import workday as workday_adapter
 from app.tools.catalog import is_allowed
 from app.services import injection as injection_service
 
@@ -63,6 +65,8 @@ def _tool_dispatch(tool: str, action: str, args: Dict[str, Any]) -> Dict[str, An
         "okta": okta_adapter,
         "google_workspace": google_workspace_adapter,
         "vpn": vpn_adapter,
+        "netsuite": netsuite_adapter,
+        "workday": workday_adapter,
     }
     adapter = adapters.get(tool.lower())
     if adapter is None:
@@ -85,7 +89,7 @@ def _tool_dispatch(tool: str, action: str, args: Dict[str, Any]) -> Dict[str, An
 
 # ── Claude plan generation ─────────────────────────────────────────────────────
 
-PROMPT_VERSION = "1.1.0"
+PROMPT_VERSION = "1.2.0"
 MODEL_NAME = "claude-haiku-4-5-20251001"
 
 
@@ -129,7 +133,7 @@ Return ONLY valid JSON matching this exact schema:
     {
       "step": <integer starting at 1>,
       "name": "<human-readable step name>",
-      "tool": "<slack|github>",
+      "tool": "<slack|github|okta|google_workspace|vpn|netsuite|workday>",
       "action": "<snake_case action name>",
       "args": { "<key>": "<value>" },
       "risk": "<LOW|MEDIUM|HIGH>",
@@ -141,7 +145,7 @@ Return ONLY valid JSON matching this exact schema:
 }
 
 Rules:
-- Use only tools: slack, github
+- Use only tools: slack, github, okta, google_workspace, vpn, netsuite, workday
 - Keep steps minimal and actionable
 - Set risk field to your best guess (the system will override with deterministic rules)
 - Flag policy concerns (e.g. granting org access, production changes) in policy_flags
@@ -275,7 +279,48 @@ def _stub_plan(
             "policy_flags": ["Offboarding actions are HUMAN_ONLY per security policy"],
         }
 
-    # Access grant — may need clarification if required fields are absent
+    # System-specific provision/revoke — HR-originated requests always carry payload["system"]
+    # Map each system to the right tool and action pair.
+    _SYSTEM_TOOL: Dict[str, Dict[str, tuple]] = {
+        # system → {"provision": (tool, action), "revoke": (tool, action)}
+        "github":           {"provision": ("github", "add_to_org"),       "revoke": ("github", "remove_from_org")},
+        "slack":            {"provision": ("slack",  "invite_to_channel"), "revoke": ("slack",  "send_message")},
+        "okta":             {"provision": ("okta",   "provision_user"),    "revoke": ("okta",   "deactivate_user")},
+        "vpn":              {"provision": ("vpn",    "grant_access"),      "revoke": ("vpn",    "revoke_access")},
+        "google_workspace": {"provision": ("google_workspace", "create_user"), "revoke": ("google_workspace", "suspend_user")},
+        "netsuite":         {"provision": ("netsuite", "provision_user"),  "revoke": ("netsuite", "deactivate_user")},
+        "workday":          {"provision": ("workday",  "provision_user"),  "revoke": ("workday",  "deactivate_user")},
+    }
+
+    system = payload.get("system", "").lower()
+    hr_action = payload.get("action", "provision").lower()  # "provision" | "revoke"
+    if system and system in _SYSTEM_TOOL:
+        user_email = payload.get("user_email", "user@example.com")
+        username = user_email.split("@")[0]
+        tool, action = _SYSTEM_TOOL[system].get(hr_action, _SYSTEM_TOOL[system]["provision"])
+        risk = "HUMAN_ONLY" if hr_action == "revoke" else ("HIGH" if system in {"github", "vpn"} else "MEDIUM")
+        args: Dict[str, Any] = {"email": user_email}
+        if system == "github":
+            args = {"org": "acme-corp", "user": username} if hr_action == "provision" else {"org": "acme-corp", "user": username}
+        elif system == "slack":
+            args = {"channel": "#general", "user_email": user_email} if hr_action == "provision" else {
+                "channel": "#general", "text": f"{username} account access revoked."
+            }
+        return {
+            "plan": [{
+                "step": 1,
+                "name": f"{hr_action.capitalize()} {system} access for {username}",
+                "tool": tool,
+                "action": action,
+                "args": args,
+                "risk": risk,
+                "requires_approval": risk in ("HIGH", "HUMAN_ONLY"),
+            }],
+            "assumptions": [f"Username derived from email: {username}"],
+            "policy_flags": [f"{hr_action.capitalize()} {system} access per HR policy"],
+        }
+
+    # Generic access grant — may need clarification if required fields are absent
     if "access" in intent_lower or "grant" in intent_lower or "collaborator" in intent_lower:
         user_email = (
             payload.get("user_email")

@@ -54,6 +54,21 @@ def create_pr(repo: str, title: str, body: str = "", base: str = "main", head: s
     )
 
 
+def add_collaborator(repo: str, user: str, permission: str = "read", org: str = "acme-corp", **kwargs: Any) -> Dict[str, Any]:
+    """Add a collaborator to a GitHub repository with the given permission (mocked)."""
+    return _result(
+        ok=True,
+        tool="github",
+        action="add_collaborator",
+        data={
+            "repo": repo,
+            "user": user,
+            "permission": permission,
+            "url": f"https://github.com/{org}/{repo}/collaborators/{user}",
+        },
+    )
+
+
 def remove_from_org(org: str, user: str, **kwargs: Any) -> Dict[str, Any]:
     """Remove a user from a GitHub organization (mocked)."""
     return _result(
@@ -68,6 +83,7 @@ def remove_from_org(org: str, user: str, **kwargs: Any) -> Dict[str, Any]:
 
 _DISPATCH: Dict[str, Any] = {
     "add_to_org": add_to_org,
+    "add_collaborator": add_collaborator,
     "create_pr": create_pr,
     "remove_from_org": remove_from_org,
 }

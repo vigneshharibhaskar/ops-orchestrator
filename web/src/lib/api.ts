@@ -43,7 +43,7 @@ async function request<T>(
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type Role = "requester" | "approver" | "admin";
+export type Role = "requester" | "approver" | "admin" | "hr";
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "HUMAN_ONLY";
 export type RequestStatus =
   | "PENDING"
