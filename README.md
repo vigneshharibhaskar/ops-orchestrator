@@ -33,6 +33,7 @@ POST /requests
 ---
 
 **What AI handles autonomously:**
+
 - Parsing natural-language intent into a structured execution plan
 - Classifying risk level for each step using deterministic rules
 - Executing LOW and MEDIUM risk steps without waiting for human input
@@ -41,6 +42,7 @@ POST /requests
 - Generating and storing a full audit trail for every decision
 
 **What the human is responsible for:**
+
 - Authorizing irreversible or high-blast-radius access changes
 - Providing written justification for each approval decision (stored in audit log)
 - Applying contextual judgment — org politics, ongoing incidents, regulatory context — that isn't visible to the system
@@ -190,9 +192,15 @@ curl -s -X POST http://localhost:8000/hr/events \
 
 ### Scan for access drift
 
+Requires approver or admin role.
+
 ```bash
 curl -s "http://localhost:8000/drift" \
-  -H "Authorization: Bearer $TOKEN" | jq .
+  -H "Authorization: Bearer $APPROVER_TOKEN" | jq .
+
+# Filter to a single user:
+curl -s "http://localhost:8000/drift?email=j.smith@acme-fintech.com" \
+  -H "Authorization: Bearer $APPROVER_TOKEN" | jq .
 ```
 
 ### End-to-end demo (no auth required)
@@ -315,6 +323,7 @@ pytest tests/ -v
 ## What Breaks First at Scale
 
 ### 1. Prompt Injection
+
 **Risk:** A malicious requester crafts an intent or payload that hijacks the LLM planner into emitting steps for arbitrary destructive actions.
 
 **Mitigation (implemented):** Every generated step passes through `_tool_dispatch` before execution. Any `(tool, action)` pair not in `TOOL_CATALOG` is blocked regardless of what the LLM emits. Adding a new capability requires an explicit code change to the allowlist.
@@ -322,6 +331,7 @@ pytest tests/ -v
 ---
 
 ### 2. Policy Drift
+
 **Risk:** Risk rules or the LLM prompt change silently. An audit log from six months ago says "LOW risk — auto-executed", but the current ruleset would classify the same step as HUMAN_ONLY. Incident replay and compliance reviews become unreliable.
 
 **Mitigation (implemented):** `POLICY_VERSION` and `PROMPT_VERSION` are stamped on every `ops_requests` row and every `PLAN_GENERATED` audit entry. A compliance query can filter by version to compare decisions across ruleset generations. Bumping either constant is the mandatory first step before merging any policy change.
@@ -329,6 +339,7 @@ pytest tests/ -v
 ---
 
 ### 4. Partial Tool Failures
+
 **Risk:** A multi-step plan partially executes — step 1 succeeds, step 2 fails. The user is left in an inconsistent state and the audit log shows COMPLETED.
 
 **Mitigation (partially implemented):** `execution_results` records per-step `ok`, `data`, and `error` fields. At scale, add a compensating-action catalog mapping each action to its rollback; if any step returns `ok: false`, trigger rollback steps before marking FAILED.
@@ -337,12 +348,12 @@ pytest tests/ -v
 
 ### MVP → Production swaps
 
-| Concern | MVP | Production swap |
-| --- | --- | --- |
-| Database | SQLite | Postgres via `DATABASE_URL` |
-| Approval queue | In-memory (lost on restart) | Redis Streams / SQS / Celery |
-| HR policy | Hardcoded JSON in `hr_policy.py` | External service or DB table |
-| Tool adapters | Mocked (Slack, GitHub, Okta, GWS, VPN, NetSuite, Workday) | Real API clients |
+| Concern        | MVP                                                       | Production swap              |
+| -------------- | --------------------------------------------------------- | ---------------------------- |
+| Database       | SQLite                                                    | Postgres via `DATABASE_URL`  |
+| Approval queue | In-memory (lost on restart)                               | Redis Streams / SQS / Celery |
+| HR policy      | Hardcoded JSON in `hr_policy.py`                          | External service or DB table |
+| Tool adapters  | Mocked (Slack, GitHub, Okta, GWS, VPN, NetSuite, Workday) | Real API clients             |
 
 ---
 
