@@ -1,6 +1,6 @@
 # Ops Orchestrator
 
-AI-native access provisioning and operational change management for regulated financial services. Natural-language requests are planned by Claude, gated through a deterministic risk engine, and either auto-executed or routed to a mandatory human approval queue ��� with every decision stamped, versioned, and auditable.
+AI-native access provisioning and operational change management for regulated financial services. Natural-language requests are planned by Claude, gated through a deterministic risk engine, and either auto-executed or routed to a mandatory human approval queue with every decision stamped, versioned, and auditable.
 
 ---
 
