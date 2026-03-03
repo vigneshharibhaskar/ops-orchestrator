@@ -106,7 +106,9 @@ function DriftTable({
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Severity</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Detail</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Days</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Actions</th>
+              {(type === "unexpected" || type === "stale") && (
+                <th className="px-4 py-3" />
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-[#f0f0ed]">
@@ -132,9 +134,9 @@ function DriftTable({
                 <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
                   {item.days_since_grant != null ? `${item.days_since_grant}d` : "—"}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <div className="flex items-center gap-2">
-                    {(type === "unexpected" || type === "stale") && item.last_grant_id && (
+                {(type === "unexpected" || type === "stale") && (
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    {item.last_grant_id && (
                       <a
                         href={`/requests/${item.last_grant_id}`}
                         className="text-xs text-gray-400 hover:text-gray-700 transition-colors"
@@ -142,22 +144,8 @@ function DriftTable({
                         View →
                       </a>
                     )}
-                    {type === "unexpected" && (
-                      <button
-                        className="inline-flex items-center px-2.5 py-1 rounded-[7px] border border-red-300 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors"
-                      >
-                        Revoke
-                      </button>
-                    )}
-                    {type === "missing" && (
-                      <button
-                        className="inline-flex items-center px-2.5 py-1 rounded-[7px] border border-amber-300 text-xs font-semibold text-amber-700 hover:bg-amber-50 transition-colors"
-                      >
-                        Grant
-                      </button>
-                    )}
-                  </div>
-                </td>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

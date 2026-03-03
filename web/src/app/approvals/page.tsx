@@ -94,6 +94,11 @@ function expiryDisplay(req: OpsRequest): { text: string; cls: string } | null {
 }
 
 const PAGE_SIZE = 15;
+const MIN_REASON_CHARS = 20;
+
+function normalizedReasonLength(reason: string): number {
+  return reason.trim().length;
+}
 
 // ── ExpandedPanel ─────────────────────────────────────────────────────────────
 
@@ -112,6 +117,8 @@ function ExpandedPanel({
   isActing: "approve" | "reject" | null;
   actionError: string;
 }) {
+  const reasonLen = normalizedReasonLength(reason);
+  const reasonTooShort = reasonLen < MIN_REASON_CHARS;
   const label = getLabel(req.intent);
   const resource = getResource(req.intent, req.payload);
   const riskSummary = req.task_plan?.risk_summary
@@ -192,13 +199,13 @@ function ExpandedPanel({
           placeholder="Explain your decision (required — minimum 20 characters)…"
           className="w-full rounded-[9px] border border-[#e8e8e4] px-3 py-2 text-sm focus:outline-none focus:border-[#111] focus:shadow-[0_0_0_3px_rgba(0,0,0,0.06)] bg-white resize-none transition-shadow"
         />
-        <p className={`text-[11px] mt-1 mb-3 ${reason.length >= 20 ? "text-green-600" : "text-gray-400"}`}>
-          {reason.length} / 20 minimum
+        <p className={`text-[11px] mt-1 mb-3 ${reasonTooShort ? "text-gray-400" : "text-green-600"}`}>
+          {reasonLen} / {MIN_REASON_CHARS} minimum
         </p>
         <div className="flex gap-3">
           <button
             onClick={() => onDecide("approve")}
-            disabled={reason.length < 20 || isActing !== null}
+            disabled={reasonTooShort || isActing !== null}
             className="flex-1 rounded-[9px] bg-[#111] text-white py-2 text-sm font-sora font-semibold hover:bg-black disabled:opacity-40 transition-colors flex items-center justify-center gap-2"
           >
             {isActing === "approve" ? (
@@ -207,7 +214,7 @@ function ExpandedPanel({
           </button>
           <button
             onClick={() => onDecide("reject")}
-            disabled={reason.length < 20 || isActing !== null}
+            disabled={reasonTooShort || isActing !== null}
             className="flex-1 rounded-[9px] border border-red-300 text-red-600 py-2 text-sm font-sora font-semibold hover:bg-red-50 disabled:opacity-40 transition-colors flex items-center justify-center gap-2"
           >
             {isActing === "reject" ? (
@@ -287,7 +294,13 @@ export default function ApprovalsPage() {
 
   async function handleDecision(req: OpsRequest, action: "approve" | "reject") {
     const reason = (reasons[req.id] ?? "").trim();
-    if (reason.length < 20) return;
+    if (reason.length < MIN_REASON_CHARS) {
+      setActionErrors((p) => ({
+        ...p,
+        [req.id]: `Reason must be at least ${MIN_REASON_CHARS} non-space characters.`,
+      }));
+      return;
+    }
     setActing((p) => ({ ...p, [req.id]: action }));
     setActionErrors((p) => ({ ...p, [req.id]: "" }));
     try {
